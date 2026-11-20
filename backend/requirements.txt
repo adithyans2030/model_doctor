@@ -1,0 +1,17 @@
+fastapi>=0.115
+uvicorn[standard]>=0.30
+python-multipart>=0.0.9
+pydantic>=2.7
+pydantic-settings>=2.3
+SQLAlchemy>=2.0
+alembic>=1.13
+pandas>=2.2
+numpy>=1.26
+charset-normalizer>=3.3
+
+# Phase 2+ (already pinned so the environment is ready)
+scikit-learn>=1.5
+xgboost>=2.0
+imbalanced-learn>=0.12
+shap>=0.45
+scipy>=1.13
