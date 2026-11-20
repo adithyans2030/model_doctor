@@ -11,6 +11,7 @@ from app.core.errors import InvalidTargetError, NotFoundError
 from app.db.models import Dataset, Project
 from app.services import ingestion, profiling
 from app.services.target import TargetAnalysis, analyze_target
+from app.ml.artifacts import delete_bundle
 from app.storage import delete_file, save_stream
 
 
@@ -96,16 +97,25 @@ def set_target(db: Session, settings: Settings, dataset: Dataset, column: str) -
     return analysis
 
 
+def _artifacts(datasets: list[Dataset]) -> list[str]:
+    return [m.artifact for d in datasets for m in d.models]
+
+
 def delete_dataset(db: Session, settings: Settings, dataset: Dataset) -> None:
-    stored = dataset.stored_filename
+    stored, artifacts = dataset.stored_filename, _artifacts([dataset])
     db.delete(dataset)
     db.commit()
     delete_file(settings.uploads_dir, stored)
+    for a in artifacts:
+        delete_bundle(settings.models_dir, a)
 
 
 def delete_project(db: Session, settings: Settings, project: Project) -> None:
     stored = [d.stored_filename for d in project.datasets]
+    artifacts = _artifacts(project.datasets)
     db.delete(project)
     db.commit()
     for name in stored:
         delete_file(settings.uploads_dir, name)
+    for a in artifacts:
+        delete_bundle(settings.models_dir, a)

@@ -10,3 +10,6 @@ backend/data/
 node_modules/
 .next/
 mlruns/
+reports/
+*.tsbuildinfo
+frontend/dist/

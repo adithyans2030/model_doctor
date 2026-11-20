@@ -23,7 +23,7 @@ class TargetAnalysis:
     warnings: list[str] = field(default_factory=list)
 
 
-def _labels(series: pd.Series, profile: dict, settings: Settings) -> pd.Series:
+def normalize_labels(series: pd.Series, profile: dict, settings: Settings) -> pd.Series:
     """Normalise target values to string class labels, or reject regression targets."""
     inferred = profile["inferred_type"]
     nonnull = series.dropna()
@@ -66,7 +66,7 @@ def analyze_target(series: pd.Series, profile: dict, settings: Settings) -> Targ
             f"at least {settings.min_rows} are needed."
         )
 
-    labels = _labels(series, profile, settings)
+    labels = normalize_labels(series, profile, settings)
     counts = labels.value_counts()
     n_classes = len(counts)
     if n_classes < 2:

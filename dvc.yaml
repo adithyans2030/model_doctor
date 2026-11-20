@@ -1,0 +1,28 @@
+# Reproducible pipeline: `dvc repro` regenerates the demo data and re-runs the
+# whole diagnosis. `dvc metrics show` / `dvc metrics diff` compare runs.
+stages:
+  make_demo_data:
+    cmd: python backend/scripts/make_demo_data.py --rows ${demo.rows} --seed ${demo.seed} --out sample_data/churn_demo.csv
+    deps:
+      - backend/scripts/make_demo_data.py
+    params:
+      - demo
+    outs:
+      - sample_data/churn_demo.csv:
+          cache: false   # small, also committed to git for convenience
+
+  diagnose:
+    cmd: python backend/scripts/run_pipeline.py --csv sample_data/churn_demo.csv --target ${pipeline.target} --budget ${pipeline.budget} --out reports
+    deps:
+      - sample_data/churn_demo.csv
+      - backend/app
+      - backend/scripts/run_pipeline.py
+    params:
+      - pipeline
+    outs:
+      - reports/diagnosis.json
+      - reports/data_report.json
+      - reports/experiment.json
+    metrics:
+      - reports/metrics.json:
+          cache: false

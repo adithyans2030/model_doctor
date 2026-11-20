@@ -31,11 +31,44 @@ class Settings(BaseSettings):
     max_integer_target_classes: int = 20
     min_class_samples: int = 10
 
+    # Training
+    max_train_rows: int = 50_000  # larger labelled sets are stratified-sampled
+    cv_folds: int = 5
+    test_size: float = 0.2
+    svm_max_rows: int = 10_000  # RBF SVM is O(n^2); skipped above this
+    hpo_iterations: int = 12
+    n_jobs: int = -1
+
+    # MLOps (Phase 7): optional MLflow mirror of the built-in registry
+    mlflow_tracking_uri: str | None = None
+    mlflow_experiment: str = "ModelDoctor"
+
+    # Security (Phase 8). Empty api_keys = open API (local development).
+    api_keys: list[str] = []  # entries "name:key"
+    rate_limit_per_minute: int = 300  # per actor / client IP; 0 disables
+    metrics_require_auth: bool = False
+
+    # AI assistant (Phase 9).
+    # auto = local Ollama if running, else Claude if ANTHROPIC_API_KEY is set, else rule-based answers.
+    assistant_mode: str = "auto"  # auto | ollama | anthropic | rules
+    ollama_url: str = "http://localhost:11434"
+    ollama_model: str = "llama3.1:latest"
+    ollama_num_ctx: int = 4096  # local models get a compact (~1k token) context
+    ollama_max_tokens: int = 400  # cap on generated tokens per answer
+    ollama_temperature: float = 0.2
+    ollama_timeout: float = 300.0  # max seconds between streamed chunks (first load can be slow)
+    llm_model: str = "claude-opus-5-5"  # used only by the anthropic provider
+    llm_effort: str = "medium"  # low | medium | high | xhigh | max
+
     cors_origins: list[str] = ["http://localhost:3000"]
 
     @property
     def uploads_dir(self) -> Path:
         return self.data_dir / "uploads"
+
+    @property
+    def models_dir(self) -> Path:
+        return self.data_dir / "models"
 
     @property
     def max_upload_bytes(self) -> int:
@@ -49,6 +82,7 @@ class Settings(BaseSettings):
 
     def ensure_dirs(self) -> None:
         self.uploads_dir.mkdir(parents=True, exist_ok=True)
+        self.models_dir.mkdir(parents=True, exist_ok=True)
 
 
 @lru_cache

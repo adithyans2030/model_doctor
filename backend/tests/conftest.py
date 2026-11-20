@@ -21,6 +21,8 @@ def settings(tmp_path) -> Settings:
         max_rows=5000,
         max_cols=50,
         min_rows=30,
+        n_jobs=1,
+        assistant_mode="rules",  # never call a real LLM from tests
     )
 
 
@@ -73,3 +75,38 @@ def upload(client, project_id: str, content: bytes, filename: str = "data.csv"):
         f"{API}/projects/{project_id}/datasets",
         files={"file": (filename, content, "text/csv")},
     )
+
+
+@pytest.fixture(scope="session")
+def churn_df() -> pd.DataFrame:
+    from scripts.make_demo_data import make_churn
+
+    return make_churn(rows=2000, seed=7)
+
+
+@pytest.fixture
+def churn_dataset(client, project, churn_df) -> dict:
+    """The demo churn dataset (with planted problems) uploaded with target = churned."""
+    ds = upload(client, project["id"], to_csv_bytes(churn_df), filename="churn.csv").json()
+    r = client.post(f"{API}/datasets/{ds['id']}/target", json={"column": "churned"})
+    assert r.status_code == 200, r.text
+    return r.json()["dataset"]
+
+
+def train(client, dataset_id: str, **body) -> dict:
+    """Start a training job and return the finished job (background tasks run inline in tests)."""
+    body.setdefault("algorithms", ["logistic_regression", "xgboost"])
+    body.setdefault("cv_folds", 3)
+    r = client.post(f"{API}/datasets/{dataset_id}/train", json=body)
+    assert r.status_code == 202, r.text
+    job = client.get(f"{API}/jobs/{r.json()['id']}").json()
+    assert job["status"] == "completed", job["error"]
+    return job
+
+
+@pytest.fixture
+def trained(client, churn_dataset) -> dict:
+    """Churn dataset with leak-free baselines trained. Returns {dataset, job, best}."""
+    job = train(client, churn_dataset["id"], drop_columns=["cancellation_request"])
+    best = client.get(f"{API}/models/{job['result']['best_model_id']}").json()
+    return {"dataset": churn_dataset, "job": job, "best": best}

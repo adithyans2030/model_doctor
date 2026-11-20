@@ -1,0 +1,55 @@
+{
+  "uid": "modeldoctor",
+  "title": "ModelDoctor",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "panels": [
+    {
+      "id": 1, "type": "stat", "title": "Latest drift score (100 = no drift)",
+      "gridPos": { "x": 0, "y": 0, "w": 8, "h": 6 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "expr": "modeldoctor_drift_score", "legendFormat": "{{model}}" }],
+      "fieldConfig": { "defaults": { "min": 0, "max": 100, "thresholds": { "mode": "absolute", "steps": [
+        { "color": "red", "value": null }, { "color": "orange", "value": 60 }, { "color": "green", "value": 85 } ] } } }
+    },
+    {
+      "id": 2, "type": "stat", "title": "Test macro-F1 (approved / production)",
+      "gridPos": { "x": 8, "y": 0, "w": 8, "h": 6 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "expr": "modeldoctor_model_f1_macro", "legendFormat": "{{model}} ({{stage}})" }],
+      "fieldConfig": { "defaults": { "min": 0, "max": 1, "decimals": 3 } }
+    },
+    {
+      "id": 3, "type": "bargauge", "title": "Models by stage",
+      "gridPos": { "x": 16, "y": 0, "w": 8, "h": 6 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "expr": "modeldoctor_models", "legendFormat": "{{stage}}" }]
+    },
+    {
+      "id": 4, "type": "timeseries", "title": "Requests per second by route",
+      "gridPos": { "x": 0, "y": 6, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "expr": "sum by (route) (rate(modeldoctor_http_requests_total[5m]))", "legendFormat": "{{route}}" }]
+    },
+    {
+      "id": 5, "type": "timeseries", "title": "p95 latency by route (s)",
+      "gridPos": { "x": 12, "y": 6, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "expr": "histogram_quantile(0.95, sum by (le, route) (rate(modeldoctor_http_request_duration_seconds_bucket[5m])))", "legendFormat": "{{route}}" }]
+    },
+    {
+      "id": 6, "type": "timeseries", "title": "5xx error rate",
+      "gridPos": { "x": 0, "y": 14, "w": 12, "h": 7 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "expr": "sum(rate(modeldoctor_http_requests_total{status=~\"5..\"}[5m]))", "legendFormat": "5xx/s" }]
+    },
+    {
+      "id": 7, "type": "timeseries", "title": "Finished jobs by status",
+      "gridPos": { "x": 12, "y": 14, "w": 12, "h": 7 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "expr": "sum by (kind, status) (increase(modeldoctor_jobs_total[1h]))", "legendFormat": "{{kind}} {{status}}" }]
+    }
+  ]
+}

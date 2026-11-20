@@ -1,0 +1,146 @@
+@import "tailwindcss";
+
+/* ---------------------------------------------------------------------------
+   Design tokens. Colour roles follow the dataviz reference palette. Dark mode is
+   its own selected set of steps (not an inversion): it follows the OS, and the
+   in-app theme toggle (html[data-theme]) wins in both directions.
+   Tailwind utilities read these through @theme below (bg-surface, text-fg-2, ...),
+   so components never need `dark:` variants.
+   --------------------------------------------------------------------------- */
+:root {
+  color-scheme: light;
+  --bg: #f6f6f4;
+  --surface-1: #fcfcfb;
+  --surface-2: #f0efec;
+  --border: #e2e1dc;
+  --text-primary: #0b0b0b;
+  --text-secondary: #52514e;
+  --text-muted: #77766f;
+  --accent: #2a78d6;
+  --accent-ink: #ffffff;
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --div-pos: #2a78d6;
+  --div-neg: #e34948;
+  --grid: #e8e7e2;
+  --good: #0ca30c;
+  --warning: #fab219;
+  --critical: #d03b3b;
+  --seq-0: #cde2fb;
+  --seq-1: #0d366b;
+}
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark;
+    --bg: #121211;
+    --surface-1: #1a1a19;
+    --surface-2: #232321;
+    --border: #33332f;
+    --text-primary: #f0efec;
+    --text-secondary: #c3c2b7;
+    --text-muted: #94938b;
+    --accent: #3987e5;
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --series-3: #199e70;
+    --div-pos: #3987e5;
+    --div-neg: #e66767;
+    --grid: #2b2b28;
+    --seq-0: #1c2a3d;
+    --seq-1: #86b6ef;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #121211;
+  --surface-1: #1a1a19;
+  --surface-2: #232321;
+  --border: #33332f;
+  --text-primary: #f0efec;
+  --text-secondary: #c3c2b7;
+  --text-muted: #94938b;
+  --accent: #3987e5;
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --div-pos: #3987e5;
+  --div-neg: #e66767;
+  --grid: #2b2b28;
+  --seq-0: #1c2a3d;
+  --seq-1: #86b6ef;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface-1);
+  --color-surface-2: var(--surface-2);
+  --color-line: var(--border);
+  --color-fg: var(--text-primary);
+  --color-fg-2: var(--text-secondary);
+  --color-fg-3: var(--text-muted);
+  --color-accent: var(--accent);
+  --color-accent-ink: var(--accent-ink);
+  --color-series-1: var(--series-1);
+  --color-series-2: var(--series-2);
+  --color-series-3: var(--series-3);
+  --color-div-pos: var(--div-pos);
+  --color-div-neg: var(--div-neg);
+  --color-grid: var(--grid);
+  --color-good: var(--good);
+  --color-warning: var(--warning);
+  --color-critical: var(--critical);
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, "Cascadia Code", Consolas, monospace;
+}
+
+@layer base {
+  body {
+    @apply bg-bg text-fg font-sans text-sm leading-normal antialiased;
+  }
+  a {
+    @apply text-accent hover:underline;
+  }
+  h1 { @apply text-2xl font-bold leading-tight; }
+  h2 { @apply text-lg font-semibold leading-tight; }
+  h3 { @apply text-[15px] font-semibold; }
+}
+
+/* A few repeated building blocks, composed from utilities. */
+@layer components {
+  .card {
+    @apply rounded-xl border border-line bg-surface p-4 shadow-sm min-w-0;
+  }
+  .btn {
+    @apply inline-flex items-center gap-1.5 rounded-lg border border-line bg-surface-2 px-3 py-1.5 text-fg
+      cursor-pointer transition-colors hover:border-fg-3 disabled:cursor-not-allowed disabled:opacity-55;
+  }
+  .btn-primary {
+    @apply border-accent bg-accent text-accent-ink hover:border-accent hover:brightness-110;
+  }
+  .btn-danger {
+    @apply text-critical;
+  }
+  .field {
+    @apply rounded-lg border border-line bg-surface px-2.5 py-1.5 text-fg max-w-full
+      focus:outline-2 focus:outline-accent;
+  }
+  .tbl {
+    @apply w-full border-collapse text-[13px];
+  }
+  .tbl th {
+    @apply border-b border-line px-2 py-1.5 text-left text-xs font-semibold text-fg-2 align-top;
+  }
+  .tbl td {
+    @apply border-b border-line px-2 py-1.5 align-top;
+  }
+  .tbl .num {
+    @apply text-right tabular-nums;
+  }
+  .badge {
+    @apply inline-flex items-center gap-1 rounded-full border border-line bg-surface-2 px-2 py-px text-xs text-fg-2;
+  }
+  .notice {
+    @apply rounded-lg border border-line bg-surface-2 px-3 py-2.5;
+  }
+}

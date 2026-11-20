@@ -1,0 +1,90 @@
+import json
+from typing import Literal
+
+from fastapi import APIRouter
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, ConfigDict, Field
+
+from app.api.deps import DbDep, SettingsDep
+from app.assistant.context import build_context
+from app.assistant.engine import answer, answer_stream, ollama_models, resolve_provider
+from app.services.datasets import get_dataset
+
+router = APIRouter(tags=["assistant"])
+
+
+class Turn(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(max_length=8000)
+
+
+class AskRequest(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
+    dataset_id: str
+    model_id: str | None = None
+    question: str = Field(min_length=1, max_length=2000)
+    history: list[Turn] = Field(default_factory=list, max_length=20)
+    llm_model: str | None = Field(default=None, max_length=200, description="Local Ollama model to use")
+
+
+class AskResponse(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
+    answer: str
+    mode: Literal["ollama", "anthropic", "rules"]
+    model: str | None
+    sources: list[str]
+    note: str | None
+    context_model_id: str | None
+
+
+class ProvidersOut(BaseModel):
+    provider: Literal["ollama", "anthropic", "rules"]
+    ollama_url: str
+    ollama_available: bool
+    default_model: str
+    local_models: list[dict]
+
+
+@router.get("/assistant/providers", response_model=ProvidersOut)
+def providers(settings: SettingsDep):
+    """Which LLM provider the assistant will use, and the local models installed in Ollama."""
+    models = ollama_models(settings, fresh=True)
+    return {
+        "provider": resolve_provider(settings),
+        "ollama_url": settings.ollama_url,
+        "ollama_available": models is not None,
+        "default_model": settings.ollama_model,
+        "local_models": models or [],
+    }
+
+
+@router.post("/assistant/ask/stream")
+def ask_stream(body: AskRequest, db: DbDep, settings: SettingsDep):
+    """Like `/assistant/ask`, but streams the answer as NDJSON events (`meta`, `delta`..., `done`).
+
+    Local models are slow on CPU; streaming shows the answer as it is generated.
+    """
+    dataset = get_dataset(db, body.dataset_id)
+    ctx = build_context(db, settings, dataset, body.model_id)  # built before streaming starts
+    context_model_id = (ctx.get("selected_model") or {}).get("id")
+    history = [t.model_dump() for t in body.history]
+
+    def events():
+        for event in answer_stream(settings, body.question, ctx, history, body.llm_model):
+            if event["type"] == "meta":
+                event["context_model_id"] = context_model_id
+            yield json.dumps(event) + "\n"
+
+    return StreamingResponse(events(), media_type="application/x-ndjson",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+@router.post("/assistant/ask", response_model=AskResponse)
+def ask(body: AskRequest, db: DbDep, settings: SettingsDep):
+    """Ask a question about a dataset's diagnosis. Answers are grounded in ModelDoctor's own results."""
+    dataset = get_dataset(db, body.dataset_id)
+    ctx = build_context(db, settings, dataset, body.model_id)
+    result = answer(settings, body.question, ctx, [t.model_dump() for t in body.history], body.llm_model)
+    return {**result, "context_model_id": (ctx.get("selected_model") or {}).get("id")}

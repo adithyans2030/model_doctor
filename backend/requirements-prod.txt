@@ -1,0 +1,5 @@
+# Production image extras: Postgres driver, MLflow client, Anthropic SDK for the assistant.
+-r requirements.txt
+psycopg[binary]>=3.2
+mlflow-skinny>=2.16
+anthropic>=1.0

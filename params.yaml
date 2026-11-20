@@ -1,0 +1,7 @@
+demo:
+  rows: 5000
+  seed: 42
+
+pipeline:
+  target: churned
+  budget: standard
