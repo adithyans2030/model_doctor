@@ -9,7 +9,9 @@ type Providers = {
   ollama_url: string;
   default_model: string;
   local_models: { name: string; parameters: string | null; size_gb: number }[];
+  loaded_models: string[];
 };
+type Warm = "idle" | "loading" | "ready" | "failed";
 
 const SUGGESTIONS = [
   "Why is my recall so low?",
@@ -28,6 +30,8 @@ export function Assistant({ datasetId, modelId }: { datasetId: string; modelId?:
   const [localModel, setLocalModel] = useState<string>(() => {
     try { return localStorage.getItem(MODEL_KEY) || ""; } catch { return ""; }
   });
+  const [warm, setWarm] = useState<Warm>("idle");
+  const [elapsed, setElapsed] = useState(0);
   const abort = useRef<AbortController | null>(null);
   const end = useRef<HTMLDivElement>(null);
 
@@ -38,6 +42,43 @@ export function Assistant({ datasetId, modelId }: { datasetId: string; modelId?:
   useEffect(() => end.current?.scrollIntoView({ block: "nearest" }), [messages]);
 
   const model = localModel || providers?.default_model || "";
+
+  // Load the selected local model into memory as soon as the panel opens, so the first
+  // answer doesn't also pay the (up to a minute) model-loading time on a CPU-only machine.
+  useEffect(() => {
+    if (providers?.provider !== "ollama" || !model) return;
+    let alive = true;
+    let timer: ReturnType<typeof setTimeout>;
+    const started = Date.now();
+    const poll = async () => {
+      try {
+        const p = await api<Providers>("/assistant/providers");
+        if (!alive) return;
+        if (p.loaded_models.includes(model)) return setWarm("ready");
+      } catch { /* keep polling */ }
+      if (Date.now() - started > 180_000) return setWarm("failed");
+      timer = setTimeout(poll, 3000);
+    };
+    setWarm("loading");
+    api<{ status: string }>("/assistant/warmup", { json: { llm_model: model } })
+      .then((r) => {
+        if (!alive) return;
+        if (r.status === "loaded") setWarm("ready");
+        else if (r.status === "loading") poll();
+        else setWarm("failed");
+      })
+      .catch(() => alive && setWarm("failed"));
+    return () => { alive = false; clearTimeout(timer); };
+  }, [providers?.provider, model]);
+
+  // Running clock while waiting for an answer.
+  useEffect(() => {
+    if (!busy) return;
+    const start = Date.now();
+    setElapsed(0);
+    const id = setInterval(() => setElapsed(Math.round((Date.now() - start) / 1000)), 1000);
+    return () => clearInterval(id);
+  }, [busy]);
   function pickModel(name: string) {
     setLocalModel(name);
     try { localStorage.setItem(MODEL_KEY, name); } catch { /* ignore */ }
@@ -81,7 +122,7 @@ export function Assistant({ datasetId, modelId }: { datasetId: string; modelId?:
           <h2>Ask ModelDoctor</h2>
           <p className="mt-1 text-[13px] text-fg-3">Answers are built from this dataset's diagnosis, models, experiments and drift reports. The assistant explains results; it doesn't invent them.</p>
         </div>
-        <ProviderPicker providers={providers} model={model} onPick={pickModel} disabled={busy} />
+        <ProviderPicker providers={providers} model={model} onPick={pickModel} disabled={busy} warm={warm} />
       </div>
 
       <div className="mt-3 flex max-h-[520px] flex-col gap-2.5 overflow-y-auto p-1" aria-live="polite">
@@ -94,7 +135,14 @@ export function Assistant({ datasetId, modelId }: { datasetId: string; modelId?:
           <div key={i} className={cx("max-w-[88%] whitespace-pre-wrap rounded-xl px-3 py-2.5",
             m.role === "user" ? "self-end bg-accent text-accent-ink" : "self-start bg-surface-2")}>
             {m.content || (m.pending && (
-              <span className="text-fg-3"><Spinner /> {providers?.provider === "ollama" ? `${model} is thinking (local models can take a minute)…` : "thinking…"}</span>
+              <span className="text-fg-3">
+                <Spinner /> {providers?.provider === "ollama"
+                  ? `${model} is ${warm === "ready" ? "thinking" : "loading and thinking"}… ${elapsed}s`
+                  : `thinking… ${elapsed}s`}
+                {providers?.provider === "ollama" && elapsed >= 15 && (
+                  <span className="block text-xs">Local models run on your CPU; 8B models can take about a minute. Pick gemma2:2b for faster answers.</span>
+                )}
+              </span>
             ))}
             {m.pending && m.content && <span className="ml-0.5 inline-block h-4 w-1.5 animate-pulse bg-fg-3 align-[-2px]" />}
             {m.meta && <div className="mt-1.5 text-xs opacity-70">{m.meta}</div>}
@@ -114,20 +162,27 @@ export function Assistant({ datasetId, modelId }: { datasetId: string; modelId?:
   );
 }
 
-function ProviderPicker({ providers, model, onPick, disabled }: {
-  providers: Providers | null; model: string; onPick: (m: string) => void; disabled: boolean;
+function ProviderPicker({ providers, model, onPick, disabled, warm }: {
+  providers: Providers | null; model: string; onPick: (m: string) => void; disabled: boolean; warm: Warm;
 }) {
   if (!providers) return <span className="badge">assistant status unknown</span>;
   if (providers.provider === "ollama") {
     return (
-      <label className="flex items-center gap-2 text-[13px] text-fg-2">
-        <span className="inline-flex items-center gap-1.5"><span className="size-2 rounded-full bg-good" aria-hidden />Local model</span>
-        <select className="field" value={model} onChange={(e) => onPick(e.target.value)} disabled={disabled}>
-          {providers.local_models.map((m) => (
-            <option key={m.name} value={m.name}>{m.name}{m.parameters ? ` · ${m.parameters}` : ""}</option>
-          ))}
-        </select>
-      </label>
+      <div className="flex flex-col items-end gap-1">
+        <label className="flex items-center gap-2 text-[13px] text-fg-2">
+          Local model
+          <select className="field" value={model} onChange={(e) => onPick(e.target.value)} disabled={disabled}>
+            {providers.local_models.map((m) => (
+              <option key={m.name} value={m.name}>{m.name}{m.parameters ? ` · ${m.parameters}` : ""}</option>
+            ))}
+          </select>
+        </label>
+        <span className="inline-flex items-center gap-1.5 text-xs text-fg-2" aria-live="polite">
+          {warm === "ready" && <><span className="size-2 rounded-full bg-good" aria-hidden />ready</>}
+          {warm === "loading" && <><Spinner /> loading model into memory…</>}
+          {warm === "failed" && <><span className="size-2 rounded-full bg-warning" aria-hidden />not preloaded (first answer will be slower)</>}
+        </span>
+      </div>
     );
   }
   if (providers.provider === "anthropic") return <span className="badge">Claude API</span>;

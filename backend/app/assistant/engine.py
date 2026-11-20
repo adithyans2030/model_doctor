@@ -90,7 +90,36 @@ def ollama_models(settings: Settings, *, fresh: bool = False) -> list[dict] | No
     return models
 
 
-def _choose_local_model(settings: Settings, model: str | None) -> str:
+def loaded_local_models(settings: Settings) -> list[str]:
+    """Models Ollama currently holds in memory (``/api/ps``); empty if unknown."""
+    try:
+        with _http() as client:
+            r = client.get(f"{settings.ollama_url.rstrip('/')}/api/ps", timeout=2.0)
+        r.raise_for_status()
+        return [m["name"] for m in r.json().get("models", [])]
+    except (httpx.HTTPError, ValueError, KeyError, TypeError):
+        return []
+
+
+def warm_up(settings: Settings, model: str | None = None) -> str:
+    """Load a local model into memory ahead of the first question.
+
+    On CPU-only machines loading an 8B model takes up to a minute; doing it while the
+    user is still typing makes the first answer start much sooner. An Ollama generate
+    request with no prompt just loads the model and keeps it resident.
+    """
+    chosen = choose_local_model(settings, model)
+    try:
+        with _http() as client:
+            client.post(f"{settings.ollama_url.rstrip('/')}/api/generate",
+                        json={"model": chosen, "keep_alive": "15m"},
+                        timeout=httpx.Timeout(settings.ollama_timeout, connect=5.0))
+    except httpx.HTTPError as exc:
+        log.warning("warm-up of %s failed: %s", chosen, exc)
+    return chosen
+
+
+def choose_local_model(settings: Settings, model: str | None) -> str:
     installed = ollama_models(settings)
     if installed is None:
         raise AssistantUnavailable(f"Ollama is not reachable at {settings.ollama_url}")
@@ -162,7 +191,7 @@ def _ollama_stream(settings: Settings, model: str, messages: list[dict]) -> Iter
 
 def _ask_ollama(settings: Settings, question: str, ctx: dict, history: list[dict],
                 model: str | None) -> tuple[str, str]:
-    chosen = _choose_local_model(settings, model)
+    chosen = choose_local_model(settings, model)
     text = "".join(_ollama_stream(settings, chosen, _local_messages(question, ctx, history))).strip()
     if not text:
         raise AssistantUnavailable("the local model returned no text")
@@ -277,7 +306,7 @@ def answer_stream(settings: Settings, question: str, ctx: dict, history: list[di
         return
 
     try:
-        chosen = _choose_local_model(settings, model)
+        chosen = choose_local_model(settings, model)
         stream = _ollama_stream(settings, chosen, _local_messages(question, ctx, history))
         first = next(stream, None)  # surfaces connection/model errors before committing to "ollama"
         if first is None:

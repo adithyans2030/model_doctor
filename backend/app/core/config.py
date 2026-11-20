@@ -51,7 +51,8 @@ class Settings(BaseSettings):
     # AI assistant (Phase 9).
     # auto = local Ollama if running, else Claude if ANTHROPIC_API_KEY is set, else rule-based answers.
     assistant_mode: str = "auto"  # auto | ollama | anthropic | rules
-    ollama_url: str = "http://localhost:11434"
+    # 127.0.0.1, not "localhost": on Windows "localhost" tries IPv6 first and adds ~2 s per call.
+    ollama_url: str = "http://127.0.0.1:11434"
     ollama_model: str = "llama3.1:latest"
     ollama_num_ctx: int = 4096  # local models get a compact (~1k token) context
     ollama_max_tokens: int = 400  # cap on generated tokens per answer

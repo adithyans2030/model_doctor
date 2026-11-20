@@ -1,13 +1,16 @@
 import json
 from typing import Literal
 
-from fastapi import APIRouter
+from fastapi import APIRouter, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.api.deps import DbDep, SettingsDep
 from app.assistant.context import build_context
-from app.assistant.engine import answer, answer_stream, ollama_models, resolve_provider
+from app.assistant.engine import (
+    AssistantUnavailable, answer, answer_stream, choose_local_model, loaded_local_models, ollama_models,
+    resolve_provider, warm_up,
+)
 from app.services.datasets import get_dataset
 
 router = APIRouter(tags=["assistant"])
@@ -45,11 +48,23 @@ class ProvidersOut(BaseModel):
     ollama_available: bool
     default_model: str
     local_models: list[dict]
+    loaded_models: list[str]
+
+
+class WarmupRequest(BaseModel):
+    llm_model: str | None = Field(default=None, max_length=200)
+
+
+class WarmupOut(BaseModel):
+    status: Literal["loaded", "loading", "unavailable"]
+    model: str | None
+    detail: str | None = None
 
 
 @router.get("/assistant/providers", response_model=ProvidersOut)
 def providers(settings: SettingsDep):
-    """Which LLM provider the assistant will use, and the local models installed in Ollama."""
+    """Which LLM provider the assistant will use, the local models installed in Ollama,
+    and which of them are already loaded in memory (ready to answer quickly)."""
     models = ollama_models(settings, fresh=True)
     return {
         "provider": resolve_provider(settings),
@@ -57,7 +72,27 @@ def providers(settings: SettingsDep):
         "ollama_available": models is not None,
         "default_model": settings.ollama_model,
         "local_models": models or [],
+        "loaded_models": loaded_local_models(settings) if models is not None else [],
     }
+
+
+@router.post("/assistant/warmup", response_model=WarmupOut)
+def warmup(body: WarmupRequest, background: BackgroundTasks, settings: SettingsDep):
+    """Start loading a local model into memory so the first answer begins sooner.
+
+    Returns immediately; loading continues in the background. Poll `/assistant/providers`
+    (`loaded_models`) to see when it's ready.
+    """
+    if resolve_provider(settings) != "ollama":
+        return {"status": "unavailable", "model": None, "detail": "The local (Ollama) provider isn't active."}
+    try:
+        chosen = choose_local_model(settings, body.llm_model)
+    except AssistantUnavailable as exc:
+        return {"status": "unavailable", "model": None, "detail": str(exc)}
+    if chosen in loaded_local_models(settings):
+        return {"status": "loaded", "model": chosen}
+    background.add_task(warm_up, settings, chosen)
+    return {"status": "loading", "model": chosen}
 
 
 @router.post("/assistant/ask/stream")

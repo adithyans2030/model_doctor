@@ -129,15 +129,24 @@ class FakeOllama:
     """Stands in for the Ollama HTTP API via httpx.MockTransport."""
 
     def __init__(self, chunks=("Recall is low because of ", "class imbalance [model.weak_class] [made.up]."),
-                 up=True, chat_status=200):
+                 up=True, chat_status=200, loaded=()):
         self.chunks, self.up, self.chat_status = chunks, up, chat_status
+        self.loaded = list(loaded)
         self.requests = []
+        self.warmups = []
 
     def handler(self, request: httpx.Request) -> httpx.Response:
         if not self.up:
             raise httpx.ConnectError("connection refused", request=request)
         if request.url.path == "/api/tags":
             return httpx.Response(200, json=TAGS)
+        if request.url.path == "/api/ps":
+            return httpx.Response(200, json={"models": [{"name": n} for n in self.loaded]})
+        if request.url.path == "/api/generate":  # warm-up: load the model, no prompt
+            body = json.loads(request.content)
+            self.warmups.append(body)
+            self.loaded.append(body["model"])
+            return httpx.Response(200, json={"model": body["model"], "done": True})
         body = json.loads(request.content)
         self.requests.append(body)
         if self.chat_status != 200:
@@ -250,3 +259,28 @@ def test_provider_resolution(settings, monkeypatch):
     assert engine.resolve_provider(settings) == "ollama"  # local model wins
     settings.assistant_mode = "rules"
     assert engine.resolve_provider(settings) == "rules"
+
+
+def test_warmup_loads_model_ahead_of_first_question(client, settings, monkeypatch):
+    fake = FakeOllama().install(monkeypatch)
+    settings.assistant_mode = "auto"
+    assert client.get(f"{API}/assistant/providers").json()["loaded_models"] == []
+
+    r = client.post(f"{API}/assistant/warmup", json={"llm_model": "gemma2"}).json()
+    assert r == {"status": "loading", "model": "gemma2:2b", "detail": None}
+    # Background task ran (inline in tests): a prompt-less generate call that keeps the model resident.
+    assert fake.warmups == [{"model": "gemma2:2b", "keep_alive": "15m"}]
+    assert client.get(f"{API}/assistant/providers").json()["loaded_models"] == ["gemma2:2b"]
+
+    # Already loaded -> no second load.
+    assert client.post(f"{API}/assistant/warmup", json={"llm_model": "gemma2:2b"}).json()["status"] == "loaded"
+    assert len(fake.warmups) == 1
+
+
+def test_warmup_when_unavailable(client, settings, monkeypatch):
+    FakeOllama().install(monkeypatch)
+    settings.assistant_mode = "ollama"
+    r = client.post(f"{API}/assistant/warmup", json={"llm_model": "mistral"}).json()
+    assert r["status"] == "unavailable" and "not installed" in r["detail"]
+    settings.assistant_mode = "rules"
+    assert client.post(f"{API}/assistant/warmup", json={}).json()["status"] == "unavailable"

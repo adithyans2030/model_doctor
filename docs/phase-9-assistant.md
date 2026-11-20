@@ -61,6 +61,17 @@ after 180 s. Three changes fixed it:
    loaded between questions, so only the first question pays the loading
    time.
 
+### Warm-up (why the first answer used to take a minute)
+
+Ollama unloads an idle model after a while, and loading an 8B model on a CPU
+takes up to a minute. When the Assistant panel opens, the dashboard calls
+`POST /assistant/warmup` for the selected model (a prompt-less Ollama
+`generate` call that loads the model). It then polls
+`/assistant/providers` (`loaded_models`) and shows "loading model into
+memory…" until the model is ready. Measured on this machine with
+`llama3.1`: the first word after **1.9 s** with the model warm, versus
+**50 s** cold. The chat also shows a running seconds counter while it waits.
+
 ## What the model receives
 
 - **System prompt:**
@@ -88,6 +99,7 @@ the health score. The response's `note` explains why the fallback was used.
 | GET | `/api/v1/assistant/providers` | active provider, whether Ollama is reachable, the default model, installed local models (name, parameters, size, context) |
 | POST | `/api/v1/assistant/ask/stream` | NDJSON: `{"type":"meta","mode","model","context_model_id"}`, then `{"type":"delta","text"}`…, then `{"type":"done","sources","note"}` |
 | POST | `/api/v1/assistant/ask` | the same, as one JSON response |
+| POST | `/api/v1/assistant/warmup` | starts loading a local model into memory in the background; returns `loaded`, `loading` or `unavailable` |
 
 Request body: `{dataset_id, model_id?, question, history?, llm_model?}`.
 
@@ -96,7 +108,7 @@ Request body: `{dataset_id, model_id?, question, history?, llm_model?}`.
 | Setting | Default |
 |---|---|
 | `MD_ASSISTANT_MODE` | `auto` |
-| `MD_OLLAMA_URL` | `http://localhost:11434` (Docker: `http://host.docker.internal:11434`) |
+| `MD_OLLAMA_URL` | `http://127.0.0.1:11434` (Docker: `http://host.docker.internal:11434`). Use 127.0.0.1 rather than `localhost`: on Windows, `localhost` tries IPv6 first and added about 2 s to every call |
 | `MD_OLLAMA_MODEL` | `llama3.1:latest` |
 | `MD_OLLAMA_NUM_CTX` / `MD_OLLAMA_MAX_TOKENS` | `4096` / `400` |
 | `MD_OLLAMA_TEMPERATURE` | `0.2` |
