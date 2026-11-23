@@ -17,8 +17,8 @@ describe("streamNdjson", () => {
   it("reassembles events split across network chunks", async () => {
     const lines = ['{"type":"meta","mode":"ollama"}\n{"type":"del', 'ta","text":"Hel"}\n', '{"type":"delta","text":"lo"}\n{"type":"done"}'];
     vi.stubGlobal("fetch", vi.fn(async () => new Response(streamOf(lines), { status: 200 })));
-    const events: any[] = [];
-    await streamNdjson("/assistant/ask/stream", {}, (e) => events.push(e));
+    const events: { type: string; text?: string }[] = [];
+    await streamNdjson<{ type: string; text?: string }>("/assistant/ask/stream", {}, (e) => events.push(e));
     expect(events.map((e) => e.type)).toEqual(["meta", "delta", "delta", "done"]);
     expect(events.filter((e) => e.type === "delta").map((e) => e.text).join("")).toBe("Hello");
   });

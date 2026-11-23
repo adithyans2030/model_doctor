@@ -1,3 +1,4 @@
+import { AlertTriangle, RotateCw } from "lucide-react";
 import { Component, type ErrorInfo, type ReactNode } from "react";
 
 type Props = { children: ReactNode; label?: string };
@@ -18,10 +19,16 @@ export class ErrorBoundary extends Component<Props, State> {
   render() {
     if (!this.state.error) return this.props.children;
     return (
-      <div className="card border-critical" role="alert">
-        <h2>Something went wrong{this.props.label ? ` in ${this.props.label}` : ""}</h2>
-        <p className="mt-1 font-mono text-xs text-fg-2">{this.state.error.message}</p>
-        <button className="btn mt-3" onClick={() => this.setState({ error: null })}>Try again</button>
+      <div className="rounded-lg border border-danger/40 bg-surface p-5" role="alert">
+        <h2 className="flex items-center gap-2 text-sm font-semibold">
+          <AlertTriangle size={16} aria-hidden className="text-danger" />
+          Something went wrong{this.props.label ? ` in ${this.props.label}` : ""}
+        </h2>
+        <p className="mt-1.5 break-words font-mono text-xs text-fg-2">{this.state.error.message}</p>
+        <button type="button" onClick={() => this.setState({ error: null })}
+          className="mt-3 inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-md border border-line bg-surface-2 px-3 text-sm hover:bg-surface-3">
+          <RotateCw size={14} aria-hidden /> Try again
+        </button>
       </div>
     );
   }

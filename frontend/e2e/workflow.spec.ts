@@ -13,16 +13,17 @@ function watch(page: Page) {
 }
 
 async function newProjectWithDataset(page: Page, project: string, file: string, target: string) {
-  await page.goto("/");
+  await page.goto("/app");
+  await page.getByRole("button", { name: "New project" }).click();
   await page.getByPlaceholder("Project name").fill(project);
   await page.getByRole("button", { name: "Create project" }).click();
-  await expect(page.getByRole("heading", { name: project })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: project })).toBeVisible();
   await page.locator('input[type="file"]').setInputFiles(SAMPLE(file));
   await page.getByRole("button", { name: "Upload & profile" }).click();
-  await expect(page.getByRole("heading", { name: file })).toBeVisible();
-  await page.locator("select").first().selectOption(target);
+  await expect(page.getByRole("heading", { level: 1, name: file })).toBeVisible();
+  await page.getByLabel("Target column").selectOption(target);
   await page.getByRole("button", { name: "Set target" }).click();
-  await expect(page.getByText(`target: ${target}`)).toBeVisible();
+  await expect(page.getByText(`Target set to '${target}'`)).toBeVisible();
 }
 
 async function trainAndOpenBest(page: Page, algorithms: string[]) {
@@ -36,7 +37,7 @@ async function trainAndOpenBest(page: Page, algorithms: string[]) {
   }
   await page.getByRole("combobox").filter({ hasText: "off" }).selectOption("0");
   await page.getByRole("button", { name: "Train", exact: true }).click();
-  await expect(page.getByText("completed:")).toBeVisible({ timeout: 180_000 });
+  await expect(page.getByText(/^completed/)).toBeVisible({ timeout: 180_000 });
   const leaderboard = page.locator('section:has(h2:text("Leaderboard"))');
   await leaderboard.getByRole("link").first().click();
 }
@@ -46,31 +47,35 @@ test("classification: diagnose, explain, optimise, approve, ask", async ({ page 
   await newProjectWithDataset(page, "E2E churn", "churn_demo.csv", "churned");
 
   await page.getByRole("tab", { name: "Data Doctor" }).click();
-  await expect(page.getByText("Possible target leakage: 'cancellation_request'")).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByRole("button", { name: /Possible target leakage: 'cancellation_request'/ })).toBeVisible({ timeout: 60_000 });
+
+  await page.getByRole("tab", { name: "Diagnosis" }).click();
+  await expect(page.getByRole("heading", { name: "Issues, ranked by severity" })).toBeVisible({ timeout: 60_000 });
 
   await trainAndOpenBest(page, ["Logistic Regression"]);
-  await expect(page.getByText("MACRO-F1 (primary)")).toBeVisible();
-  await expect(page.getByText("Confusion matrix (test set)")).toBeVisible();
+  await expect(page.getByText("Macro-F1 (primary)")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Confusion matrix" })).toBeVisible();
 
   await page.getByRole("tab", { name: "Explainability" }).click();
   await expect(page.getByText("What drives the model")).toBeVisible({ timeout: 60_000 });
-  await page.locator("select").first().selectOption({ index: 1 });
+  await page.getByLabel("Test row").selectOption({ index: 1 });
   await expect(page.getByText(/^Predicted '/)).toBeVisible();
   await page.getByLabel("Explanation method").selectOption("lime");
   await expect(page.getByText(/fidelity/)).toBeVisible();
 
   await page.getByRole("tab", { name: "Experiments" }).click();
-  await page.locator("select").first().selectOption("quick");
+  await page.getByLabel("Search budget").selectOption("quick");
   await page.getByRole("button", { name: "Run experiments" }).click();
-  await expect(page.getByText("Latest result")).toBeVisible({ timeout: 180_000 });
+  await expect(page.getByRole("heading", { name: "Latest result" })).toBeVisible({ timeout: 180_000 });
   await expect(page.getByText("Baseline (leaking features removed)")).toBeVisible();
 
-  await page.getByRole("tab", { name: "Registry" }).click();
-  await page.getByPlaceholder("Note (required").fill("e2e approval");
+  await page.getByRole("tab", { name: "Approval" }).click();
+  await page.getByLabel(/Decision note/).fill("e2e approval");
   const ack = page.getByLabel("I acknowledge these risks");
   if (await ack.count()) await ack.check();
   await page.getByRole("button", { name: "Approve" }).click();
-  await expect(page.getByText("candidate → approved")).toBeVisible();
+  await page.getByRole("dialog").getByRole("button", { name: "Approve" }).click();
+  await expect(page.getByText("Stage is now approved.")).toBeVisible();
 
   await page.getByRole("tab", { name: "Assistant" }).click();
   await page.getByRole("button", { name: "What should I fix first?" }).click();
@@ -93,11 +98,16 @@ test("regression: target summary, R² leaderboard, predicted-vs-actual chart", a
   await page.screenshot({ path: "test-results/regression-performance.png", fullPage: true });
 
   await page.getByRole("tab", { name: "Explainability" }).click();
-  await expect(page.getByText(/Mean absolute error/)).toBeVisible({ timeout: 60_000 });
-  await page.locator("select").first().selectOption({ index: 1 });
+  await expect(page.getByText(/^MAE .* test rows/)).toBeVisible({ timeout: 60_000 });
+  await page.getByLabel("Test row").selectOption({ index: 1 });
   await expect(page.getByText(/^Predicted \d/)).toBeVisible();
   await page.screenshot({ path: "test-results/regression-explain.png", fullPage: true });
   expect(problems).toEqual([]);
+});
+
+test("old dashboard URLs redirect under /app", async ({ page }) => {
+  await page.goto("/projects/does-not-exist");
+  await expect(page).toHaveURL(/\/app\/projects\/does-not-exist$/);
 });
 
 test("unknown pages show the 404 view", async ({ page }) => {

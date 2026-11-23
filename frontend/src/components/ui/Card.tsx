@@ -34,7 +34,7 @@ export function Card({ title, description, actions, children, className, bodyCla
             {title && <Heading id={headingId} className="text-sm font-semibold text-fg">{title}</Heading>}
             {description && <p className="mt-0.5 text-xs text-fg-3">{description}</p>}
           </div>
-          {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
+          {actions && <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2">{actions}</div>}
         </header>
       )}
       <div className={cx(!flush && "p-4", bodyClassName)}>{children}</div>

@@ -62,9 +62,10 @@ function headers(json: boolean): Record<string, string> {
 
 async function failure(res: Response): Promise<ApiError> {
   if (res.status === 401) window.dispatchEvent(new Event("md:unauthorized"));
-  const data = await res.json().catch(() => null);
+  type ErrorBody = { error?: { code?: string; message?: string; details?: { loc: string[]; msg: string }[] } };
+  const data = (await res.json().catch(() => null)) as ErrorBody | null;
   const err = data?.error;
-  const detail = err?.details?.map((d: { loc: string[]; msg: string }) => `${d.loc.slice(1).join(".")}: ${d.msg}`).join("; ");
+  const detail = err?.details?.map((d) => `${d.loc.slice(1).join(".")}: ${d.msg}`).join("; ");
   return new ApiError(res.status, err?.code || "error", (err?.message || res.statusText) + (detail ? ` (${detail})` : ""));
 }
 
@@ -88,7 +89,7 @@ export async function api<T>(path: string, opts: Options = {}): Promise<T> {
 }
 
 /** POST JSON and read a newline-delimited JSON stream, calling onEvent per line. */
-export async function streamNdjson(path: string, json: unknown, onEvent: (e: any) => void, signal?: AbortSignal) {
+export async function streamNdjson<E>(path: string, json: unknown, onEvent: (e: E) => void, signal?: AbortSignal) {
   let res: Response;
   try {
     res = await fetch(`${API_URL}/api/v1${path}`, { method: "POST", headers: headers(true), body: JSON.stringify(json), signal });
@@ -108,10 +109,10 @@ export async function streamNdjson(path: string, json: unknown, onEvent: (e: any
     while ((nl = buffer.indexOf("\n")) >= 0) {
       const line = buffer.slice(0, nl).trim();
       buffer = buffer.slice(nl + 1);
-      if (line) onEvent(JSON.parse(line));
+      if (line) onEvent(JSON.parse(line) as E);
     }
   }
-  if (buffer.trim()) onEvent(JSON.parse(buffer));
+  if (buffer.trim()) onEvent(JSON.parse(buffer) as E);
 }
 
 export const fmt = {

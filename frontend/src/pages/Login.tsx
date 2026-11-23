@@ -1,12 +1,13 @@
 import { useState, type FormEvent } from "react";
 import { Navigate, useLocation, useNavigate } from "react-router-dom";
-import { ErrorBox, cx } from "@/components/legacy-ui";
+import { Logo } from "@/components/Logo";
+import { Button, InlineError } from "@/components/ui";
 import { useAuth } from "@/lib/auth";
 
 export default function Login() {
   const { user, status, login, register } = useAuth();
   const navigate = useNavigate();
-  const from = (useLocation().state as { from?: string } | null)?.from || "/";
+  const from = (useLocation().state as { from?: string } | null)?.from || "/app";
   const firstUser = status ? !status.has_users : false;
   const [mode, setMode] = useState<"login" | "register">(firstUser ? "register" : "login");
   const [email, setEmail] = useState("");
@@ -34,35 +35,38 @@ export default function Login() {
 
   const canRegister = !status || status.open_registration || firstUser;
   return (
-    <div className="mx-auto mt-10 max-w-sm">
-      <div className="card p-6">
-        <h1>{mode === "login" ? "Sign in" : firstUser ? "Create the admin account" : "Create an account"}</h1>
-        {firstUser && <p className="mt-1 text-[13px] text-fg-2">This is the first account, so it becomes the admin.</p>}
-        <form className="mt-4 space-y-3" onSubmit={submit}>
-          <label className="block text-[13px] text-fg-2">Email
-            <input className="field mt-1 w-full" type="email" autoComplete="email" required value={email}
-              onChange={(e) => setEmail(e.target.value)} />
-          </label>
+    <div className="mx-auto mt-8 max-w-sm sm:mt-16">
+      <div className="rounded-xl border border-line bg-surface p-6 shadow-md">
+        <Logo withName={false} />
+        <h1 className="mt-4 text-lg font-semibold">{mode === "login" ? "Sign in to ModelDoctor" : firstUser ? "Create the admin account" : "Create an account"}</h1>
+        {firstUser && <p className="mt-1 text-sm text-fg-2">This is the first account, so it becomes the admin.</p>}
+        <form className="mt-5 space-y-4" onSubmit={submit}>
+          <div>
+            <label htmlFor="email" className="mb-1 block text-sm font-medium">Email</label>
+            <input id="email" className="field w-full" type="email" autoComplete="email" required value={email} onChange={(e) => setEmail(e.target.value)} />
+          </div>
           {mode === "register" && (
-            <label className="block text-[13px] text-fg-2">Name
-              <input className="field mt-1 w-full" required maxLength={120} value={name} onChange={(e) => setName(e.target.value)} />
-            </label>
+            <div>
+              <label htmlFor="name" className="mb-1 block text-sm font-medium">Name</label>
+              <input id="name" className="field w-full" autoComplete="name" required maxLength={120} value={name} onChange={(e) => setName(e.target.value)} />
+            </div>
           )}
-          <label className="block text-[13px] text-fg-2">Password
-            <input className="field mt-1 w-full" type="password" required minLength={mode === "register" ? 8 : 1}
-              autoComplete={mode === "login" ? "current-password" : "new-password"} value={password}
-              onChange={(e) => setPassword(e.target.value)} />
-          </label>
-          {mode === "register" && <p className="text-xs text-fg-3">At least 8 characters. Stored only as an Argon2 hash.</p>}
-          <button className={cx("btn btn-primary w-full justify-center")} disabled={busy}>
-            {busy ? "Please wait…" : mode === "login" ? "Sign in" : "Create account"}
-          </button>
-          <ErrorBox error={error} />
+          <div>
+            <label htmlFor="password" className="mb-1 block text-sm font-medium">Password</label>
+            <input id="password" className="field w-full" type="password" required minLength={mode === "register" ? 8 : 1}
+              aria-describedby={mode === "register" ? "pw-help" : undefined}
+              autoComplete={mode === "login" ? "current-password" : "new-password"} value={password} onChange={(e) => setPassword(e.target.value)} />
+            {mode === "register" && <p id="pw-help" className="mt-1 text-xs text-fg-3">At least 8 characters. Stored only as an Argon2 hash.</p>}
+          </div>
+          <InlineError error={error} />
+          <Button type="submit" variant="primary" size="lg" className="w-full" loading={busy}>
+            {mode === "login" ? "Sign in" : "Create account"}
+          </Button>
         </form>
         {canRegister && !firstUser && (
-          <p className="mt-4 text-center text-[13px] text-fg-2">
+          <p className="mt-5 text-center text-sm text-fg-2">
             {mode === "login" ? "No account? " : "Already registered? "}
-            <button className="text-accent hover:underline" onClick={() => { setMode(mode === "login" ? "register" : "login"); setError(null); }}>
+            <button type="button" className="cursor-pointer text-accent-fg hover:underline" onClick={() => { setMode(mode === "login" ? "register" : "login"); setError(null); }}>
               {mode === "login" ? "Create one" : "Sign in"}
             </button>
           </p>

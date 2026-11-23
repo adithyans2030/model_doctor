@@ -1,61 +1,57 @@
-import { useState } from "react";
 import { Navigate } from "react-router-dom";
-import { ErrorBox, Loading, Section } from "@/components/legacy-ui";
-import { api, fmt } from "@/lib/api";
+import { PageHeader } from "@/components/domain/PageHeader";
+import { QueryView } from "@/components/domain/QueryView";
+import { Badge, Button, Card, InlineError, TBody, TD, TH, THead, TR, Table, TableSkeleton } from "@/components/ui";
+import { fmt } from "@/lib/api";
 import { isAdmin, useAuth } from "@/lib/auth";
-import { useResource } from "@/lib/hooks";
-import type { User } from "@/lib/types";
+import { useUpdateUser, useUsers } from "@/lib/queries";
+import type { Role } from "@/lib/types";
 
 export default function Users() {
   const { user, status } = useAuth();
-  const users = useResource<User[]>("/auth/users");
-  const [error, setError] = useState<string | null>(null);
-  if (!isAdmin(user, status) || !user) return <Navigate to="/" replace />;
-
-  async function update(id: string, patch: Partial<Pick<User, "role" | "is_active">>) {
-    setError(null);
-    try {
-      await api(`/auth/users/${id}`, { method: "PATCH", json: patch });
-      users.reload();
-    } catch (e) {
-      setError((e as Error).message);
-    }
-  }
+  const admin = isAdmin(user, status) && !!user;
+  const users = useUsers(admin);
+  const update = useUpdateUser();
+  if (!admin) return <Navigate to="/app" replace />;
 
   return (
-    <Section title="Users">
-      <p className="mb-3 text-[13px] text-fg-2">
-        <b>Viewers</b> can read everything and ask the assistant. <b>Members</b> can also upload, train and run experiments.
-        <b> Admins</b> can additionally approve/promote models and manage users.
-      </p>
-      <ErrorBox error={error || users.error} />
-      {!users.data ? <Loading /> : (
-        <div className="overflow-x-auto">
-          <table className="tbl">
-            <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th>Last sign-in</th></tr></thead>
-            <tbody>
-              {users.data.map((u) => (
-                <tr key={u.id}>
-                  <td>{u.name}{u.id === user.id && <span className="badge ml-1.5">you</span>}</td>
-                  <td>{u.email}</td>
-                  <td>
-                    <select className="field" value={u.role} disabled={u.id === user.id}
-                      onChange={(e) => update(u.id, { role: e.target.value as User["role"] })}>
-                      <option value="viewer">viewer</option><option value="member">member</option><option value="admin">admin</option>
-                    </select>
-                  </td>
-                  <td>
-                    <button className="btn" disabled={u.id === user.id} onClick={() => update(u.id, { is_active: !u.is_active })}>
-                      {u.is_active ? "Active · deactivate" : "Inactive · reactivate"}
-                    </button>
-                  </td>
-                  <td className="text-xs text-fg-3">{u.last_login_at ? fmt.date(u.last_login_at) : "never"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </Section>
+    <div>
+      <PageHeader crumbs={[{ label: "Projects", to: "/app" }, { label: "Users" }]} title="Users"
+        meta={<span><b className="font-medium text-fg">Viewers</b> read everything and ask the assistant. <b className="font-medium text-fg">Members</b> also upload, train and run experiments. <b className="font-medium text-fg">Admins</b> also approve and promote models and manage users.</span>} />
+      <InlineError error={update.error} className="mb-3" />
+      <Card flush>
+        <QueryView query={users} label="Loading users" skeleton={<TableSkeleton rows={3} cols={5} />}>
+          {(list) => (
+            <Table label="Users">
+              <THead><TR><TH>Name</TH><TH>Email</TH><TH>Role</TH><TH>Status</TH><TH>Last sign-in</TH></TR></THead>
+              <TBody>
+                {list.map((u) => {
+                  const self = u.id === user.id;
+                  return (
+                    <TR key={u.id}>
+                      <TD className="whitespace-nowrap">{u.name}{self && <Badge tone="accent" className="ml-2">you</Badge>}</TD>
+                      <TD className="font-mono text-xs">{u.email}</TD>
+                      <TD>
+                        <select className="field" aria-label={`Role for ${u.name}`} value={u.role} disabled={self}
+                          onChange={(e) => update.mutate({ id: u.id, patch: { role: e.target.value as Role } })}>
+                          <option value="viewer">viewer</option><option value="member">member</option><option value="admin">admin</option>
+                        </select>
+                      </TD>
+                      <TD className="whitespace-nowrap">
+                        <Badge tone={u.is_active ? "success" : "neutral"}>{u.is_active ? "active" : "inactive"}</Badge>
+                        <Button size="sm" variant="ghost" className="ml-2" disabled={self} onClick={() => update.mutate({ id: u.id, patch: { is_active: !u.is_active } })}>
+                          {u.is_active ? "Deactivate" : "Reactivate"}
+                        </Button>
+                      </TD>
+                      <TD className="whitespace-nowrap text-xs text-fg-3">{u.last_login_at ? fmt.date(u.last_login_at) : "never"}</TD>
+                    </TR>
+                  );
+                })}
+              </TBody>
+            </Table>
+          )}
+        </QueryView>
+      </Card>
+    </div>
   );
 }

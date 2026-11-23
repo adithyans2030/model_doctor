@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
 import { Navigate, useLocation } from "react-router-dom";
-import { Loading } from "@/components/legacy-ui";
+import { LoadingRegion, Skeleton } from "@/components/ui";
 import { api, getToken, setToken } from "./api";
 import type { User } from "./types";
 
@@ -76,8 +76,8 @@ export function useAuth(): Ctx {
 export function RequireAuth({ children }: { children: ReactNode }) {
   const { user, status, ready } = useAuth();
   const location = useLocation();
-  if (!ready) return <Loading />;
-  if (status?.auth_required && !user) return <Navigate to="/login" replace state={{ from: location.pathname }} />;
+  if (!ready) return <LoadingRegion label="Checking sign-in"><Skeleton className="h-40" /></LoadingRegion>;
+  if (status?.auth_required && !user) return <Navigate to="/app/login" replace state={{ from: location.pathname }} />;
   return <>{children}</>;
 }
 
