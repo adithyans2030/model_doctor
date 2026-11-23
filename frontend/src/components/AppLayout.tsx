@@ -1,5 +1,5 @@
 import { BookOpen, KeyRound, LogOut, Settings, Users } from "lucide-react";
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { API_URL, getApiKey, setApiKey } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -25,6 +25,7 @@ export function AppLayout() {
   const { user, status, logout } = useAuth();
   const [settings, setSettings] = useState(false);
   const [key, setKey] = useState(getApiKey());
+  useEffect(() => { document.title = "ModelDoctor · Dashboard"; }, []);
 
   return (
     <>
@@ -48,7 +49,7 @@ export function AppLayout() {
           </nav>
           <span className="flex-1" />
           <a href={`${API_URL}/docs`} target="_blank" rel="noreferrer"
-            className={buttonClasses({ variant: "ghost", size: "sm", className: "hidden sm:inline-flex" })}>
+            className={buttonClasses({ variant: "ghost", size: "sm", className: "max-sm:hidden" })}>
             <BookOpen size={14} aria-hidden /> API docs
           </a>
           <ThemeToggle />

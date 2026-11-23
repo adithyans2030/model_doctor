@@ -15,7 +15,7 @@ export function Table({ label, caption, children, className, dense }: {
   dense?: boolean;
 }) {
   return (
-    <div role="region" aria-label={label} tabIndex={0} className={cx("max-w-full overflow-x-auto", className)}>
+    <div role="region" aria-label={label} tabIndex={0} className={cx("relative max-w-full overflow-x-auto", className)}>
       <table className={cx("w-full border-collapse text-sm", dense && "[&_td]:py-1 [&_th]:py-1")}>
         <caption className={caption ? "pb-2 text-left text-xs text-fg-3" : "sr-only"}>{caption ?? label}</caption>
         {children}

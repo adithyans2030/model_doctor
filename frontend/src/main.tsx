@@ -4,14 +4,14 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { StrictMode, Suspense, lazy, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, Navigate, Route, Routes, useParams } from "react-router-dom";
-import { AppLayout } from "@/components/AppLayout";
 import { ToastProvider } from "@/components/ui";
-import { AuthProvider, RequireAuth } from "@/lib/auth";
+import { RequireAuth } from "@/lib/auth";
 import { createQueryClient } from "@/lib/queries";
 import "./index.css";
 
 // Every page is its own chunk: the landing page never downloads dashboard code and vice versa.
 const Landing = lazy(() => import("@/pages/landing/Landing"));
+const AppShell = lazy(() => import("@/components/AppShell"));
 const Home = lazy(() => import("@/pages/Home"));
 const ProjectPage = lazy(() => import("@/pages/Project"));
 const DatasetPage = lazy(() => import("@/pages/dataset/DatasetPage"));
@@ -35,10 +35,9 @@ createRoot(document.getElementById("root")!).render(
     <QueryClientProvider client={queryClient}>
       <ToastProvider>
         <BrowserRouter>
-          <AuthProvider>
             <Routes>
               <Route index element={<Suspense fallback={null}><Landing /></Suspense>} />
-              <Route path="app" element={<AppLayout />}>
+              <Route path="app" element={<Suspense fallback={null}><AppShell /></Suspense>}>
                 <Route index element={authed(<Home />)} />
                 <Route path="login" element={<Login />} />
                 <Route path="projects/:id" element={authed(<ProjectPage />)} />
@@ -52,11 +51,10 @@ createRoot(document.getElementById("root")!).render(
               <Route path="models/:id" element={<LegacyRedirect to="/app/models/:id" />} />
               <Route path="login" element={<Navigate to="/app/login" replace />} />
               <Route path="admin/users" element={<Navigate to="/app/admin/users" replace />} />
-              <Route element={<AppLayout />}>
+              <Route element={<Suspense fallback={null}><AppShell /></Suspense>}>
                 <Route path="*" element={<NotFound />} />
               </Route>
             </Routes>
-          </AuthProvider>
         </BrowserRouter>
       </ToastProvider>
     </QueryClientProvider>

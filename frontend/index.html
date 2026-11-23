@@ -3,16 +3,37 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="Intelligent ML diagnostics & optimisation" />
-    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <title>ModelDoctor: find out why your ML model underperforms</title>
+    <meta name="description" content="ModelDoctor diagnoses machine-learning models with deterministic checks, tests targeted fixes with cross-validation, and sends the best candidate to a person for approval. Open source, runs locally." />
     <meta name="theme-color" content="#0b0c0e" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="ModelDoctor" />
+    <meta property="og:title" content="ModelDoctor: find out why your ML model underperforms" />
+    <meta property="og:description" content="Deterministic diagnosis, cross-validated fixes and a human approval gate for ML models. The AI assistant only explains the results." />
+    <meta property="og:image" content="/og.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="ModelDoctor: find out why your model underperforms, then prove the fix." />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="ModelDoctor: find out why your ML model underperforms" />
+    <meta name="twitter:description" content="Deterministic diagnosis, cross-validated fixes and a human approval gate for ML models." />
+    <meta name="twitter:image" content="/og.png" />
+
     <script>
       /* Apply the saved theme before first paint (dark is the default). */
       try { if (localStorage.getItem("md_theme") === "light") document.documentElement.dataset.theme = "light"; } catch (e) {}
     </script>
-    <title>ModelDoctor</title>
+    <style>
+      /* Pre-paint background so there's no white flash before CSS loads. */
+      html { background: #0b0c0e; color-scheme: dark; }
+      html[data-theme="light"] { background: #f7f7f5; color-scheme: light; }
+    </style>
   </head>
   <body>
+    <noscript>ModelDoctor needs JavaScript. See the project on GitHub: https://github.com/adithyans2030/model_doctor</noscript>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
