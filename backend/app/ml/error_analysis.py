@@ -184,3 +184,124 @@ def prediction_findings(errors: dict, fairness: dict) -> list[dict]:
             recommendation="Check representation of the weaker group; evaluate per-group thresholds or reweighting.",
             columns=[g["feature"]]))
     return out
+
+
+# ----------------------------------------------------------------------------- regression
+LARGE_ERROR_QUANTILE = 0.9  # "large errors" = the worst 10% absolute errors
+# (max − min group MAE) / overall MAE. Error gaps of ~30% between small groups happen by
+# chance, so only clearly larger gaps are flagged.
+REG_FAIR_WARN, REG_FAIR_CRIT = 0.5, 1.0
+
+
+def analyse_regression_errors(X: pd.DataFrame, spec: FeatureSpec, y: np.ndarray, pred: np.ndarray,
+                              row_ids: list) -> dict:
+    n = len(y)
+    abs_err = np.abs(np.asarray(y, dtype=float) - np.asarray(pred, dtype=float))
+    overall = float(abs_err.mean()) if n else 0.0
+    large = abs_err >= np.quantile(abs_err, LARGE_ERROR_QUANTILE) if n else np.zeros(0, bool)
+    n_large = int(large.sum())
+    min_n = max(MIN_SLICE, int(MIN_SLICE_SHARE * n))
+    numeric = set(spec.numeric_like)
+
+    slices, concentration = [], []
+    for col in spec.features:
+        labels = _slice_labels(X[col].reset_index(drop=True), col in numeric, col in spec.datetime)
+        if labels is None:
+            continue
+        for value, idx in labels.groupby(labels).groups.items():
+            idx = np.asarray(idx)
+            if len(idx) < min_n:
+                continue
+            mae = float(abs_err[idx].mean())
+            entry = {
+                "feature": col, "value": str(value), "n": int(len(idx)), "share": round(len(idx) / n, 4),
+                "mae": round(mae, 6), "lift": round(mae / overall, 3) if overall else None,
+                "excess_error": round((mae - overall) * len(idx), 4),
+                "large_error_share": round(float(large[idx].sum()) / n_large, 4) if n_large else 0.0,
+            }
+            if n_large and entry["large_error_share"] >= 0.5 and entry["large_error_share"] - entry["share"] >= 0.15:
+                concentration.append(entry)
+            if overall and mae / overall >= LIFT_REPORT:
+                slices.append(entry)
+    slices.sort(key=lambda e: -e["excess_error"])
+    concentration.sort(key=lambda e: -(e["large_error_share"] - e["share"]))
+
+    order = np.argsort(-abs_err)
+    worst = [{"row_id": row_ids[i], "true": round(float(y[i]), 6), "predicted": round(float(pred[i]), 6),
+              "abs_error": round(float(abs_err[i]), 6)} for i in order[:20]]
+    statements = [
+        f"{e['large_error_share']:.0%} of the largest errors occur where {e['feature']} = {e['value']} "
+        f"({e['share']:.0%} of test rows)." for e in concentration[:3]
+    ] + [
+        f"The average error is {e['lift']:.1f}× higher when {e['feature']} = {e['value']} "
+        f"({e['mae']:.4g} vs {overall:.4g} overall)." for e in slices[:3]
+    ]
+    return {
+        "summary": {"n_test": n, "mae": round(overall, 6), "large_errors": n_large,
+                    "large_error_threshold": round(float(np.quantile(abs_err, LARGE_ERROR_QUANTILE)), 6) if n else None},
+        "slices": slices[:15], "large_error_concentration": concentration[:5],
+        "statements": statements, "largest_errors": worst,
+    }
+
+
+def group_performance_regression(X: pd.DataFrame, spec: FeatureSpec, y: np.ndarray, pred: np.ndarray) -> dict:
+    abs_err = np.abs(np.asarray(y, dtype=float) - np.asarray(pred, dtype=float))
+    overall = float(abs_err.mean()) or 1e-12
+    groups_out, max_gap, worst_col = [], 0.0, None
+    for col in spec.categorical:
+        s = X[col].reset_index(drop=True)
+        s = s.astype(object).where(s.notna(), "missing")
+        if not 2 <= s.nunique() <= 10:
+            continue
+        rows = []
+        for value, idx in s.groupby(s).groups.items():
+            idx = np.asarray(idx)
+            if len(idx) < MIN_SLICE:
+                continue
+            yy = np.asarray(y, dtype=float)[idx]
+            r2 = None
+            if np.var(yy) > 0:
+                r2 = round(float(1 - np.sum((yy - np.asarray(pred)[idx]) ** 2) / np.sum((yy - yy.mean()) ** 2)), 4)
+            rows.append({"value": str(value), "n": int(len(idx)), "mae": round(float(abs_err[idx].mean()), 6), "r2": r2})
+        if len(rows) < 2:
+            continue
+        maes = [r["mae"] for r in rows]
+        gap = round((max(maes) - min(maes)) / overall, 4)
+        groups_out.append({"feature": col, "gap": gap, "groups": rows})
+        if gap > max_gap:
+            max_gap, worst_col = gap, col
+    groups_out.sort(key=lambda g: -g["gap"])
+    return {"metric": "relative_mae_gap", "max_gap": round(max_gap, 4) if groups_out else None,
+            "worst_feature": worst_col, "features": groups_out}
+
+
+def regression_prediction_findings(errors: dict, fairness: dict) -> list[dict]:
+    out = []
+    overall = errors["summary"]["mae"]
+    for e in [s for s in errors["slices"] if (s["lift"] or 0) >= LIFT_WARN][:3]:
+        out.append(finding(
+            "prediction.error_cluster", "prediction", "warning",
+            f"Errors are {e['lift']:.1f}× larger where {e['feature']} = {e['value']}",
+            {**e, "overall_mae": overall},
+            cause="The model hasn't learned this segment well (few examples, different behaviour, or missing signal).",
+            recommendation="Inspect this segment; add segment-specific features or more examples.",
+            columns=[e["feature"]]))
+    for e in errors["large_error_concentration"][:2]:
+        out.append(finding(
+            "prediction.large_error_concentration", "prediction", "warning",
+            f"{e['large_error_share']:.0%} of the largest errors occur where {e['feature']} = {e['value']}",
+            e, impact="The worst predictions are concentrated in one segment.",
+            recommendation="Check this segment for outliers or a missing explanatory feature.",
+            columns=[e["feature"]]))
+    if fairness["max_gap"] is not None and fairness["max_gap"] >= REG_FAIR_WARN:
+        g = next(f for f in fairness["features"] if f["feature"] == fairness["worst_feature"])
+        lo = min(g["groups"], key=lambda r: r["mae"])
+        hi = max(g["groups"], key=lambda r: r["mae"])
+        out.append(finding(
+            "fairness.group_gap", "fairness", "critical" if fairness["max_gap"] >= REG_FAIR_CRIT else "warning",
+            f"Error differs across '{g['feature']}' groups: {hi['value']} MAE {hi['mae']:.4g} vs {lo['value']} {lo['mae']:.4g}",
+            {"feature": g["feature"], "gap": g["gap"], "groups": g["groups"]},
+            impact="Some groups get systematically less accurate predictions.",
+            recommendation="Check representation of the weaker group; consider group-specific features.",
+            columns=[g["feature"]]))
+    return out

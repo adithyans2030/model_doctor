@@ -2,12 +2,14 @@
 
 The findings' ``interventions`` become a plan of experiments that run as a
 greedy sequence: each step starts from the best configuration so far, changes
-one thing, and is kept only if it improves **cross-validated macro-F1 on the
-training data**. The fixed test set is used for reporting, never for choosing,
-so the reported improvement isn't the result of tuning to the test set.
+one thing, and is kept only if it improves the **cross-validated primary metric
+on the training data** (macro-F1 for classification, R² for regression). The
+fixed test set is used for reporting, never for choosing.
 
-    Baseline (leaks removed) → class weights | SMOTE → deduplicate → feature selection
-      → hyperparameter search → calibration → decision threshold
+    classification: Baseline (leaks removed) → class weights | SMOTE → deduplicate → feature selection
+                    → hyperparameter search → calibration → decision threshold
+    regression:     Baseline (leaks removed) → log-transform target → deduplicate → feature selection
+                    → hyperparameter search
 """
 
 import time
@@ -15,16 +17,23 @@ from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 
 import numpy as np
-from sklearn.model_selection import RandomizedSearchCV, StratifiedKFold
+from sklearn.model_selection import KFold, RandomizedSearchCV, StratifiedKFold
 
 from app.diagnostics.findings import INTERVENTIONS
 from app.ml.algorithms import ALGORITHMS
 from app.ml.evaluation import best_threshold
-from app.ml.pipeline import TrainConfig, build_pipeline, config_spec, fit_params
-from app.ml.training import TrainingData, TrainResult, _training_rows, cross_validate_config, train_and_evaluate
+from app.ml.pipeline import TrainConfig, build_pipeline, config_spec, fit_params, search_prefix
+from app.ml.training import (
+    TrainingData, TrainResult, _training_rows, cross_validate_config, train_and_evaluate,
+)
 
 SELECTION_FOLDS = 3
 MIN_GAIN = 0.002
+METRIC_LABEL = {"f1_macro": "macro-F1", "r2": "R²"}
+
+CLASSIFICATION_ORDER = ["class_weight", "smote", "drop_duplicates", "feature_selection", "hyperparameter_tuning",
+                        "calibration", "threshold_tuning"]
+REGRESSION_ORDER = ["target_transform", "drop_duplicates", "feature_selection", "hyperparameter_tuning"]
 
 
 @dataclass
@@ -38,9 +47,15 @@ class Trial:
     reason: str = ""
 
     @property
-    def cv_f1(self) -> float:
+    def primary(self) -> str:
+        return self.result.metrics["primary_metric"]
+
+    @property
+    def cv_score(self) -> float:
         cv = self.result.metrics.get("cv")
-        return cv["val"]["f1_macro"]["mean"] if cv else self.result.metrics["test"]["f1_macro"]
+        if cv and cv["val"].get(self.primary):
+            return cv["val"][self.primary]["mean"]
+        return self.result.metrics["test"][self.primary]
 
 
 @dataclass
@@ -56,6 +71,8 @@ def _py(v):
         return int(v)
     if isinstance(v, np.floating):
         return float(v)
+    if isinstance(v, tuple):
+        return list(v)
     return v
 
 
@@ -65,7 +82,8 @@ def minority_recall(metrics: dict) -> float:
 
 
 def build_plan(findings: list[dict], data_report: dict, base: TrainConfig, binary: bool,
-               allowed: list[str] | None = None) -> Plan:
+               allowed: list[str] | None = None, task: str = "classification",
+               target_non_negative: bool = False) -> Plan:
     wanted = {i for f in findings for i in f["interventions"]}
     if allowed is not None:
         wanted &= set(allowed)
@@ -88,13 +106,20 @@ def build_plan(findings: list[dict], data_report: dict, base: TrainConfig, binar
         if not drops:
             wanted.discard("feature_selection")
 
-    order = ["class_weight", "smote", "drop_duplicates", "feature_selection", "hyperparameter_tuning",
-             "calibration", "threshold_tuning"]
-    if not binary:
-        wanted.discard("threshold_tuning")
-    if base.algorithm == "svm":
-        wanted.discard("calibration")  # the SVM is already Platt-calibrated
-    plan = Plan(leaky_columns=leaky, interventions=[i for i in order if i in wanted], feature_drops=drops)
+    notes = []
+    if task == "regression":
+        order = REGRESSION_ORDER
+        if "target_transform" in wanted and (not target_non_negative or base.target_transform):
+            wanted.discard("target_transform")
+            if not target_non_negative:
+                notes.append("Log-transform skipped: the target has negative values.")
+    else:
+        order = CLASSIFICATION_ORDER
+        if not binary:
+            wanted.discard("threshold_tuning")
+        if base.algorithm == "svm":
+            wanted.discard("calibration")  # the SVM is already Platt-calibrated
+    plan = Plan(leaky_columns=leaky, interventions=[i for i in order if i in wanted], feature_drops=drops, notes=notes)
     if leaky:
         plan.notes.append(f"Leaking features removed from every trial: {', '.join(leaky)}.")
     return plan
@@ -103,15 +128,16 @@ def build_plan(findings: list[dict], data_report: dict, base: TrainConfig, binar
 def tune_hyperparameters(cfg: TrainConfig, data: TrainingData, n_iter: int, n_jobs: int) -> dict:
     spec_cfg = config_spec(data.spec, cfg)
     X, y = _training_rows(cfg, data.X_train[spec_cfg.features], data.y_train)
-    pipe = build_pipeline(cfg, spec_cfg, y, n_jobs)
-    prefix = "model__estimator__" if cfg.calibration else "model__"
-    space = {prefix + k: v for k, v in ALGORITHMS[cfg.algorithm].search_space.items()}
-    search = RandomizedSearchCV(
-        pipe, space, n_iter=n_iter, scoring="f1_macro",
-        cv=StratifiedKFold(SELECTION_FOLDS, shuffle=True, random_state=data.seed),
-        random_state=data.seed, n_jobs=1, error_score=np.nan, refit=False,
-    )
-    search.fit(X, y, **fit_params(cfg, y))
+    pipe = build_pipeline(cfg, spec_cfg, y, n_jobs, data.task)
+    prefix = search_prefix(cfg)
+    space = {prefix + k: v for k, v in ALGORITHMS[cfg.algorithm].search_space[data.task].items()}
+    if data.task == "regression":
+        scoring, cv = "r2", KFold(SELECTION_FOLDS, shuffle=True, random_state=data.seed)
+    else:
+        scoring, cv = "f1_macro", StratifiedKFold(SELECTION_FOLDS, shuffle=True, random_state=data.seed)
+    search = RandomizedSearchCV(pipe, space, n_iter=n_iter, scoring=scoring, cv=cv,
+                                random_state=data.seed, n_jobs=1, error_score=np.nan, refit=False)
+    search.fit(X, y, **fit_params(cfg, y, data.task))
     return {k.removeprefix(prefix): _py(v) for k, v in search.best_params_.items()}
 
 
@@ -121,19 +147,20 @@ def run_optimisation(
     dummy: dict | None = None, progress: Callable[[str], None] | None = None,
 ) -> dict:
     binary = data.positive_index is not None
-    plan = build_plan(findings, data_report, base, binary, allowed)
+    plan = build_plan(findings, data_report, base, binary, allowed, data.task,
+                      target_non_negative=bool(data.task == "regression" and np.min(data.y_train) >= 0))
     if budget == "quick":
         if "hyperparameter_tuning" in plan.interventions:
             plan.interventions.remove("hyperparameter_tuning")
             plan.notes.append("Hyperparameter search skipped (quick budget).")
     elif "hyperparameter_tuning" not in plan.interventions and (allowed is None or "hyperparameter_tuning" in allowed):
         # Defaults are rarely optimal, so the standard budget always includes a search.
-        pos = plan.interventions.index("calibration") if "calibration" in plan.interventions else (
-            plan.interventions.index("threshold_tuning") if "threshold_tuning" in plan.interventions
-            else len(plan.interventions))
+        after = [i for i in ("calibration", "threshold_tuning") if i in plan.interventions]
+        pos = plan.interventions.index(after[0]) if after else len(plan.interventions)
         plan.interventions.insert(pos, "hyperparameter_tuning")
     say = progress or (lambda _: None)
     trials: list[Trial] = []
+    label = METRIC_LABEL[data.primary]
 
     def evaluate(name, intervention, cfg) -> Trial:
         say(f"Trial {len(trials) + 1}: {name}")
@@ -148,11 +175,11 @@ def run_optimisation(
 
     def consider(t: Trial):
         nonlocal best
-        if t.cv_f1 > best.cv_f1 + MIN_GAIN:
-            t.kept, t.reason = True, f"CV macro-F1 {best.cv_f1:.3f} → {t.cv_f1:.3f}"
+        if t.cv_score > best.cv_score + MIN_GAIN:
+            t.kept, t.reason = True, f"CV {label} {best.cv_score:.3f} → {t.cv_score:.3f}"
             best = t
         else:
-            t.reason = f"no CV gain ({t.cv_f1:.3f} vs {best.cv_f1:.3f})"
+            t.reason = f"no CV gain ({t.cv_score:.3f} vs {best.cv_score:.3f})"
 
     started = time.perf_counter()
     imbalance = [i for i in ("class_weight", "smote") if i in plan.interventions]
@@ -163,8 +190,11 @@ def run_optimisation(
             options.append(evaluate("Class weighting", "class_weight", replace(anchor.config, class_weight="balanced")))
         if "smote" in imbalance:
             options.append(evaluate("SMOTE oversampling", "smote", replace(anchor.config, resampling="smote")))
-        for t in sorted(options, key=lambda t: -t.cv_f1):
+        for t in sorted(options, key=lambda t: -t.cv_score):
             consider(t)
+
+    if "target_transform" in plan.interventions:
+        consider(evaluate("Log-transform the target", "target_transform", replace(best.config, target_transform="log1p")))
 
     if "drop_duplicates" in plan.interventions:
         consider(evaluate("Remove duplicate training rows", "drop_duplicates", replace(best.config, dedupe=True)))
@@ -200,25 +230,33 @@ def run_optimisation(
         "baseline": baseline,
         "best": best,
         "seconds": round(time.perf_counter() - started, 1),
-        "selection": f"{SELECTION_FOLDS}-fold cross-validated macro-F1 on the training split; "
+        "selection": f"{SELECTION_FOLDS}-fold cross-validated {label} on the training split; "
                      "the test set is only used to report results.",
     }
 
 
+def trial_metrics(metrics: dict) -> dict:
+    test = metrics["test"]
+    if metrics.get("task") == "regression":
+        return {"primary": test["r2"], "r2": test["r2"], "rmse": test["rmse"], "mae": test["mae"], "mape": test.get("mape")}
+    return {
+        "primary": test["f1_macro"], "f1_macro": test["f1_macro"], "accuracy": test["accuracy"],
+        "balanced_accuracy": test["balanced_accuracy"], "roc_auc": test["roc_auc"], "pr_auc": test.get("pr_auc"),
+        "ece": test["ece"], "minority_recall": minority_recall(metrics),
+    }
+
+
 def trial_summary(t: Trial, baseline: Trial) -> dict:
-    m = t.result.metrics
-    test = m["test"]
+    m, b = trial_metrics(t.result.metrics), trial_metrics(baseline.result.metrics)
+    delta = {"primary": round(m["primary"] - b["primary"], 4)}
+    if "minority_recall" in m:
+        delta.update(f1_macro=delta["primary"], minority_recall=round(m["minority_recall"] - b["minority_recall"], 4))
+    else:
+        delta.update(r2=delta["primary"], rmse=round(m["rmse"] - b["rmse"], 4))
     return {
         "step": t.step, "name": t.name, "intervention": t.intervention,
         "description": t.config.describe(), "config": t.config.to_dict(),
-        "kept": t.kept, "reason": t.reason, "cv_f1_macro": round(t.cv_f1, 4),
-        "metrics": {
-            "f1_macro": test["f1_macro"], "accuracy": test["accuracy"], "balanced_accuracy": test["balanced_accuracy"],
-            "roc_auc": test["roc_auc"], "pr_auc": test.get("pr_auc"), "ece": test["ece"],
-            "minority_recall": minority_recall(m),
-        },
-        "delta_vs_baseline": {
-            "f1_macro": round(test["f1_macro"] - baseline.result.metrics["test"]["f1_macro"], 4),
-            "minority_recall": round(minority_recall(m) - minority_recall(baseline.result.metrics), 4),
-        },
+        "kept": t.kept, "reason": t.reason, "cv_primary": round(t.cv_score, 4),
+        "metrics": m,
+        "delta_vs_baseline": delta,
     }

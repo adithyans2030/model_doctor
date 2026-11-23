@@ -1,0 +1,122 @@
+schema: '2.0'
+stages:
+  make_demo_data:
+    cmd: python backend/scripts/make_demo_data.py --rows 5000 --seed 42 --out 
+      sample_data/churn_demo.csv
+    deps:
+    - path: backend/scripts/make_demo_data.py
+      hash: md5
+      md5: 3d352467a25b503e0dadffbd607cb3ad
+      size: 7510
+    params:
+      params.yaml:
+        demo:
+          rows: 5000
+          seed: 42
+    outs:
+    - path: sample_data/churn_demo.csv
+      hash: md5
+      md5: 10f3353096e1e40c48fe5b7287935bf3
+      size: 410733
+  make_house_data:
+    cmd: python backend/scripts/make_demo_data.py --kind house_prices --rows 
+      3000 --seed 42 --out sample_data/house_prices_demo.csv
+    deps:
+    - path: backend/scripts/make_demo_data.py
+      hash: md5
+      md5: 3d352467a25b503e0dadffbd607cb3ad
+      size: 7510
+    params:
+      params.yaml:
+        houses:
+          rows: 3000
+          seed: 42
+          target: price
+    outs:
+    - path: sample_data/house_prices_demo.csv
+      hash: md5
+      md5: 22f8e215494c17a134022b0936ee003c
+      size: 214105
+  diagnose:
+    cmd: python backend/scripts/run_pipeline.py --csv sample_data/churn_demo.csv
+      --target churned --budget standard --out reports
+    deps:
+    - path: backend/app
+      hash: md5
+      md5: c74a363ce9db80f39b9be78c0f659bd0.dir
+      size: 812849
+      nfiles: 132
+    - path: backend/scripts/run_pipeline.py
+      hash: md5
+      md5: 4a895370fe9b19fa14d1784dcb147a02
+      size: 5243
+    - path: sample_data/churn_demo.csv
+      hash: md5
+      md5: 10f3353096e1e40c48fe5b7287935bf3
+      size: 410733
+    params:
+      params.yaml:
+        pipeline:
+          target: churned
+          budget: standard
+    outs:
+    - path: reports/data_report.json
+      hash: md5
+      md5: cd3456b7e50a7d11c9f48197ae371032
+      size: 22987
+    - path: reports/diagnosis.json
+      hash: md5
+      md5: 969ecd982fd28b19ad639dfd4a270988
+      size: 19288
+    - path: reports/experiment.json
+      hash: md5
+      md5: 1945bbdc02ce60ebdecf7c719f1c38c5
+      size: 10373
+    - path: reports/metrics.json
+      hash: md5
+      md5: 89506794fdd89e87db7a8d08481ae27c
+      size: 308
+  diagnose_regression:
+    cmd: python backend/scripts/run_pipeline.py --csv 
+      sample_data/house_prices_demo.csv --target price --budget standard --out 
+      reports/regression
+    deps:
+    - path: backend/app
+      hash: md5
+      md5: c74a363ce9db80f39b9be78c0f659bd0.dir
+      size: 812849
+      nfiles: 132
+    - path: backend/scripts/run_pipeline.py
+      hash: md5
+      md5: 4a895370fe9b19fa14d1784dcb147a02
+      size: 5243
+    - path: sample_data/house_prices_demo.csv
+      hash: md5
+      md5: 22f8e215494c17a134022b0936ee003c
+      size: 214105
+    params:
+      params.yaml:
+        houses:
+          rows: 3000
+          seed: 42
+          target: price
+        pipeline:
+          target: churned
+          budget: standard
+    outs:
+    - path: reports/regression/data_report.json
+      hash: md5
+      md5: b780597e3486db9445bee3d4b8c1ee5a
+      size: 24505
+    - path: reports/regression/diagnosis.json
+      hash: md5
+      md5: 982be429dc3e0cbe15c16bb874a84946
+      size: 11841
+    - path: reports/regression/experiment.json
+      hash: md5
+      md5: 581e363fb6e6c7cc060a41f6db213ac3
+      size: 5655
+    - path: reports/regression/metrics.json
+      hash: md5
+      md5: 2b139adb53caa20c6a5c2eefb6898c5b
+      size: 292

@@ -41,8 +41,10 @@ def _model_row(m: MLModel) -> dict:
     return {
         "id": m.id, "name": m.name, "version": m.version, "stage": m.stage, "source": m.source,
         "config": m.config.get("algorithm") and {k: v for k, v in m.config.items() if v not in (None, [], {}, False)},
-        "test": {k: t.get(k) for k in ("accuracy", "balanced_accuracy", "f1_macro", "roc_auc", "pr_auc", "ece")},
-        "minority_class": t.get("positive_class") or t["worst_class"],
+        "task": m.task,
+        "test": ({k: t.get(k) for k in ("r2", "rmse", "mae", "mape")} if m.task == "regression" else
+                 {k: t.get(k) for k in ("accuracy", "balanced_accuracy", "f1_macro", "roc_auc", "pr_auc", "ece")}),
+        "minority_class": None if m.task == "regression" else (t.get("positive_class") or t["worst_class"]),
         "checks": [f["check"] for f in m.findings],
     }
 
@@ -50,6 +52,8 @@ def _model_row(m: MLModel) -> dict:
 _TOPICS = {
     "recall": ("model.weak_class", "data.class_imbalance", "model.misleading_accuracy", "model.suboptimal_threshold",
                "prediction.fn_concentration"),
+    "error": ("model.heteroscedastic_errors", "model.outlier_errors", "data.skewed_target", "prediction.error_cluster",
+              "prediction.large_error_concentration"),
     "drift": ("distribution.",),
     "overfit": ("model.overfitting", "model.high_variance", "model.underfitting"),
     "leak": ("feature.leakage", "model.suspicious_performance", "model.dominant_feature"),
@@ -94,7 +98,7 @@ def compact_context(ctx: dict, question: str, max_findings: int = 8) -> dict:
     }
     if any(w in q for w in ("compare", "version", " vs", "versus")):
         out["models"] = [{"name": m["name"], "version": m["version"], "test": m["test"],
-                          "minority_recall": m["minority_class"]["recall"]} for m in models]
+                          "minority_recall": (m["minority_class"] or {}).get("recall")} for m in models]
     if ctx.get("explanations"):
         e = ctx["explanations"]
         out["top_features"] = e["top_features_shap"][:5] or e["top_features_permutation"][:5]
@@ -153,8 +157,9 @@ def build_context(db: Session, settings: Settings, dataset: Dataset, model_id: s
         "best_model_id": (j.result or {}).get("best_model_id"),
         "best": (j.result or {}).get("best", {}).get("description"),
         "improvement": (j.result or {}).get("improvement"),
-        "trials": [{"name": t["name"], "kept": t["kept"], "cv_f1_macro": t["cv_f1_macro"],
-                    "test_f1_macro": t["metrics"]["f1_macro"], "minority_recall": t["metrics"]["minority_recall"]}
+        "trials": [{"name": t["name"], "kept": t["kept"], "cv_primary": t.get("cv_primary"),
+                    "test_primary": t["metrics"].get("primary"), "minority_recall": t["metrics"].get("minority_recall"),
+                    "rmse": t["metrics"].get("rmse")}
                    for t in (j.result or {}).get("trials", [])],
         "recommendation": (j.result or {}).get("recommendation"),
     } for j in jobs]

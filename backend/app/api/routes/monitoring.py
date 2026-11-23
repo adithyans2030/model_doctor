@@ -71,8 +71,14 @@ def metrics(db: DbDep):
     lines += gauge_lines("modeldoctor_jobs", "Jobs by kind and current status.",
                          [({"kind": k, "status": s}, n) for k, s, n in job_counts])
     watched = list(db.scalars(select(MLModel).where(MLModel.stage.in_(["production", "approved"]))))
-    lines += gauge_lines("modeldoctor_model_f1_macro", "Test macro-F1 of approved/production models.",
-                         [({"model": m.name, "model_id": m.id, "stage": m.stage}, m.primary_score) for m in watched])
+    lines += gauge_lines("modeldoctor_model_primary_score",
+                         "Test primary metric (macro-F1 or R²) of approved/production models.",
+                         [({"model": m.name, "model_id": m.id, "stage": m.stage,
+                            "metric": m.metrics.get("primary_metric", "f1_macro")}, m.primary_score) for m in watched])
+    # Kept for existing dashboards: classification models only.
+    lines += gauge_lines("modeldoctor_model_f1_macro", "Test macro-F1 of approved/production classification models.",
+                         [({"model": m.name, "model_id": m.id, "stage": m.stage}, m.primary_score)
+                          for m in watched if m.task == "classification"])
     drift_samples = []
     for m in watched:
         r = db.scalars(select(Report).where(Report.model_id == m.id, Report.kind == "drift")

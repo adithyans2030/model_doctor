@@ -59,7 +59,7 @@ def test_shifted_batch_is_flagged(client, model, settings):
     checks = {f["check"] for f in rep["findings"]}
     assert {"distribution.feature_drift", "distribution.missing_shift", "distribution.concept_drift",
             "distribution.schema_change"} <= checks
-    assert rep["performance"]["delta_f1_macro"] < -0.1
+    assert rep["performance"]["metric"] == "f1_macro" and rep["performance"]["delta_primary"] < -0.1
     assert rep["schema"]["extra_columns"] == ["new_col"]
     assert rep["score"] < 60
     assert not (settings.data_dir / "batches").exists() or not any((settings.data_dir / "batches").iterdir())

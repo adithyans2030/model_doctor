@@ -59,6 +59,7 @@ class Dataset(Base):
     target_column: Mapped[str | None] = mapped_column(String(255), nullable=True)
     task_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
     class_distribution: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    target_summary: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # regression targets
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
@@ -144,7 +145,11 @@ class MLModel(Base):
 
     @property
     def primary_score(self) -> float:
-        return self.metrics["test"]["f1_macro"]
+        return self.metrics["test"][self.metrics.get("primary_metric", "f1_macro")]
+
+    @property
+    def task(self) -> str:
+        return self.metrics.get("task") or "classification"
 
 
 class ModelEvent(Base):
@@ -174,3 +179,18 @@ class AuditLog(Base):
     status_code: Mapped[int] = mapped_column(Integer)
     client_ip: Mapped[str] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+
+
+class User(Base):
+    """A person who signs in. Passwords are stored only as Argon2id hashes."""
+
+    __tablename__ = "users"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(120))
+    password_hash: Mapped[str] = mapped_column(String(255))
+    role: Mapped[str] = mapped_column(String(16), default="member")  # viewer | member | admin
+    is_active: Mapped[bool] = mapped_column(default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

@@ -92,6 +92,7 @@ def set_target(db: Session, settings: Settings, dataset: Dataset, column: str) -
     dataset.target_column = column
     dataset.task_type = analysis.task_type
     dataset.class_distribution = analysis.class_distribution
+    dataset.target_summary = analysis.summary
     db.commit()
     db.refresh(dataset)
     return analysis

@@ -11,6 +11,16 @@ stages:
       - sample_data/churn_demo.csv:
           cache: false   # small, also committed to git for convenience
 
+  make_house_data:
+    cmd: python backend/scripts/make_demo_data.py --kind house_prices --rows ${houses.rows} --seed ${houses.seed} --out sample_data/house_prices_demo.csv
+    deps:
+      - backend/scripts/make_demo_data.py
+    params:
+      - houses
+    outs:
+      - sample_data/house_prices_demo.csv:
+          cache: false
+
   diagnose:
     cmd: python backend/scripts/run_pipeline.py --csv sample_data/churn_demo.csv --target ${pipeline.target} --budget ${pipeline.budget} --out reports
     deps:
@@ -25,4 +35,21 @@ stages:
       - reports/experiment.json
     metrics:
       - reports/metrics.json:
+          cache: false
+
+  diagnose_regression:
+    cmd: python backend/scripts/run_pipeline.py --csv sample_data/house_prices_demo.csv --target ${houses.target} --budget ${pipeline.budget} --out reports/regression
+    deps:
+      - sample_data/house_prices_demo.csv
+      - backend/app
+      - backend/scripts/run_pipeline.py
+    params:
+      - houses
+      - pipeline
+    outs:
+      - reports/regression/diagnosis.json
+      - reports/regression/data_report.json
+      - reports/regression/experiment.json
+    metrics:
+      - reports/regression/metrics.json:
           cache: false

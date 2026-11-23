@@ -80,8 +80,11 @@ def change_stage(db: Session, model: MLModel, to_stage: str, *, actor: str, note
 
 
 # ----------------------------------------------------------------------------- comparison
-_METRICS = ["f1_macro", "balanced_accuracy", "accuracy", "roc_auc", "pr_auc", "ece", "log_loss"]
-_LOWER_IS_BETTER = {"ece", "log_loss"}
+_METRICS = {
+    "classification": ["f1_macro", "balanced_accuracy", "accuracy", "roc_auc", "pr_auc", "ece", "log_loss"],
+    "regression": ["r2", "rmse", "mae", "median_ae", "mape", "explained_variance"],
+}
+_LOWER_IS_BETTER = {"ece", "log_loss", "rmse", "mae", "median_ae", "mape"}
 
 
 def _minority(m: MLModel) -> dict:
@@ -95,17 +98,20 @@ def compare_models(a: MLModel, b: MLModel) -> dict:
     ta, tb = a.metrics["test"], b.metrics["test"]
     same_split = a.metrics["split"] == b.metrics["split"]
     rows = []
-    for k in _METRICS:
+    if a.task != b.task:
+        raise DomainError("Models must solve the same task to be compared.", code="invalid_request")
+    for k in _METRICS[a.task]:
         va, vb = ta.get(k), tb.get(k)
         delta = None if va is None or vb is None else round(vb - va, 4)
         better = None
         if delta:
             better = "b" if (delta < 0 if k in _LOWER_IS_BETTER else delta > 0) else "a"
         rows.append({"metric": k, "a": va, "b": vb, "delta": delta, "better": better})
-    ma, mb = _minority(a), _minority(b)
-    rows.append({"metric": f"recall ({ma['label']})", "a": ma["recall"], "b": mb["recall"],
-                 "delta": round(mb["recall"] - ma["recall"], 4),
-                 "better": "b" if mb["recall"] > ma["recall"] else "a" if mb["recall"] < ma["recall"] else None})
+    if a.task == "classification":
+        ma, mb = _minority(a), _minority(b)
+        rows.append({"metric": f"recall ({ma['label']})", "a": ma["recall"], "b": mb["recall"],
+                     "delta": round(mb["recall"] - ma["recall"], 4),
+                     "better": "b" if mb["recall"] > ma["recall"] else "a" if mb["recall"] < ma["recall"] else None})
 
     config_diff = {k: {"a": a.config.get(k), "b": b.config.get(k)}
                    for k in sorted(set(a.config) | set(b.config)) if a.config.get(k) != b.config.get(k)}
@@ -115,11 +121,15 @@ def compare_models(a: MLModel, b: MLModel) -> dict:
     winner = b if b.primary_score > a.primary_score else a
     loser = a if winner is b else b
     d = abs(b.primary_score - a.primary_score)
+    label = "R²" if a.task == "regression" else "macro-F1"
     summary = [
-        f"{winner.name} (v{winner.version}) has the higher macro-F1 ({winner.primary_score:.3f} vs "
+        f"{winner.name} (v{winner.version}) has the higher {label} ({winner.primary_score:.3f} vs "
         f"{loser.primary_score:.3f}, Δ {d:.3f}).",
-        f"Minority-class recall: v{a.version} {ma['recall']:.0%} → v{b.version} {mb['recall']:.0%}.",
     ]
+    if a.task == "classification":
+        summary.append(f"Minority-class recall: v{a.version} {ma['recall']:.0%} → v{b.version} {mb['recall']:.0%}.")
+    else:
+        summary.append(f"RMSE: v{a.version} {ta['rmse']:.4g} → v{b.version} {tb['rmse']:.4g}.")
     if checks_a - checks_b:
         summary.append(f"v{b.version} resolves: {', '.join(sorted(checks_a - checks_b))}.")
     if checks_b - checks_a:

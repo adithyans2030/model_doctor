@@ -47,6 +47,12 @@ class Settings(BaseSettings):
     api_keys: list[str] = []  # entries "name:key"
     rate_limit_per_minute: int = 300  # per actor / client IP; 0 disables
     metrics_require_auth: bool = False
+    # User accounts: off by default for local use. When required, every API call needs a
+    # signed-in user (Bearer token) or an API key.
+    auth_required: bool = False
+    open_registration: bool = True  # the first account always becomes admin
+    secret_key: str | None = None  # JWT signing key; generated and stored in data_dir if unset
+    token_ttl_minutes: int = 720
 
     # AI assistant (Phase 9).
     # auto = local Ollama if running, else Claude if ANTHROPIC_API_KEY is set, else rule-based answers.

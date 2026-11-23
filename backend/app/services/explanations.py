@@ -4,19 +4,21 @@ import numpy as np
 import pandas as pd
 from sqlalchemy.orm import Session
 
-from app.core.config import Settings
 from app.core.errors import DomainError, NotFoundError
+from app.core.config import Settings
 from app.db.models import MLModel, utcnow
 from app.diagnostics.findings import sort_findings
-from app.ml.error_analysis import analyse_errors, group_performance, prediction_findings
+from app.ml.error_analysis import (
+    analyse_errors, analyse_regression_errors, group_performance, group_performance_regression,
+    prediction_findings, regression_prediction_findings,
+)
 from app.ml.evaluation import predict_labels
 from app.ml.explain import explain_row, global_importance, reference_values
 from app.ml.features import FeatureSpec, prepare_frame
-from app.ml.training import TrainingData, prepare_training_data
+from app.ml.training import prepare_training_data
 from app.services.datasets import get_dataset, load_dataframe
-from app.services.target import normalize_labels
+from app.services.target import is_regression_target, normalize_labels, regression_values
 from app.services.training import load_model_bundle
-
 
 def holdout(db: Session, settings: Settings, model: MLModel):
     """Rebuild the exact train/test split the model was evaluated on."""
@@ -42,25 +44,38 @@ def compute_explanations(db: Session, settings: Settings, model: MLModel, *, ref
         return model.explanations
     _, _, bundle, data = holdout(db, settings, model)
     spec = FeatureSpec.from_dict(bundle["spec"])
-    pos, classes = bundle["positive_index"], bundle["classes"]
     X_test = data.X_test
-    proba = bundle["pipeline"].predict_proba(X_test[spec.features])
-    pred = predict_labels(proba, pos, bundle["config"].get("threshold"))
     row_ids = [int(i) for i in X_test.index]
 
-    errors = analyse_errors(X_test, spec, data.y_test, pred, proba, classes, pos, row_ids)
-    fairness = group_performance(X_test, spec, data.y_test, pred, classes, pos)
-    samples = [
-        {"row_id": row_ids[i], "true": classes[int(data.y_test[i])], "predicted": classes[int(pred[i])],
-         "confidence": round(float(proba[i].max()), 4), "correct": bool(pred[i] == data.y_test[i])}
-        for i in range(min(200, len(row_ids)))
-    ]
+    if data.task == "regression":
+        pred = np.asarray(bundle["pipeline"].predict(X_test[spec.features]), dtype=float)
+        errors = analyse_regression_errors(X_test, spec, data.y_test, pred, row_ids)
+        fairness = group_performance_regression(X_test, spec, data.y_test, pred)
+        findings = regression_prediction_findings(errors, fairness)
+        samples = [
+            {"row_id": row_ids[i], "true": round(float(data.y_test[i]), 6), "predicted": round(float(pred[i]), 6),
+             "abs_error": round(abs(float(data.y_test[i] - pred[i])), 6), "confidence": None, "correct": None}
+            for i in range(min(200, len(row_ids)))
+        ]
+    else:
+        pos, classes = bundle["positive_index"], bundle["classes"]
+        proba = bundle["pipeline"].predict_proba(X_test[spec.features])
+        pred = predict_labels(proba, pos, bundle["config"].get("threshold"))
+        errors = analyse_errors(X_test, spec, data.y_test, pred, proba, classes, pos, row_ids)
+        fairness = group_performance(X_test, spec, data.y_test, pred, classes, pos)
+        findings = prediction_findings(errors, fairness)
+        samples = [
+            {"row_id": row_ids[i], "true": classes[int(data.y_test[i])], "predicted": classes[int(pred[i])],
+             "confidence": round(float(proba[i].max()), 4), "correct": bool(pred[i] == data.y_test[i])}
+            for i in range(min(200, len(row_ids)))
+        ]
     model.explanations = {
         "computed_at": utcnow().isoformat(),
+        "task": data.task,
         "global": global_importance(bundle, X_test, data.y_test),
         "error_analysis": errors,
         "fairness": fairness,
-        "findings": sort_findings(prediction_findings(errors, fairness)),
+        "findings": sort_findings(findings),
         "samples": samples,
         "reference": {k: _py(v) for k, v in reference_values(data.X_train, spec).items()},
     }
@@ -69,14 +84,14 @@ def compute_explanations(db: Session, settings: Settings, model: MLModel, *, ref
     return model.explanations
 
 
-def explain_prediction(db: Session, settings: Settings, model: MLModel, *,
-                       row_id: int | None = None, record: dict | None = None) -> dict:
+def explain_prediction(db: Session, settings: Settings, model: MLModel, *, row_id: int | None = None,
+                       record: dict | None = None, method: str = "auto") -> dict:
     explanations = compute_explanations(db, settings, model)
     bundle = load_model_bundle(settings, model)
     spec = FeatureSpec.from_dict(bundle["spec"])
     actual = None
+    dataset = get_dataset(db, model.dataset_id)
     if row_id is not None:
-        dataset = get_dataset(db, model.dataset_id)
         df = load_dataframe(dataset, settings)
         if row_id not in df.index:
             raise NotFoundError(f"Row {row_id} does not exist in the dataset.")
@@ -84,13 +99,19 @@ def explain_prediction(db: Session, settings: Settings, model: MLModel, *,
         target = model.feature_spec["target"]
         if pd.notna(raw.iloc[0][target]):
             profile = next(c for c in dataset.columns if c["name"] == target)
-            actual = normalize_labels(raw[target], profile, settings).iloc[0]
+            if model.task == "regression":
+                actual = float(regression_values(raw[target]).iloc[0])
+            elif not is_regression_target(raw[target], profile, settings):
+                actual = normalize_labels(raw[target], profile, settings).iloc[0]
     else:
         raw = pd.DataFrame.from_records([record])
         missing = [c for c in spec.features if c not in raw.columns]
         if missing:
             raise DomainError(f"Record is missing feature columns: {', '.join(missing)}.", code="invalid_request")
     prepared = prepare_frame(raw, spec)
-    result = explain_row(bundle, prepared, explanations["reference"], raw.iloc[0].to_dict())
+
+    # LIME perturbs features towards the typical training value (median / mode) stored with the
+    # explanations, so no extra data needs loading.
+    result = explain_row(bundle, prepared, explanations["reference"], raw.iloc[0].to_dict(), method=method)
     in_test = row_id is not None and any(s["row_id"] == row_id for s in explanations["samples"])
     return {"model_id": model.id, "row_id": row_id, "actual": actual, "in_test_sample": in_test, **result}

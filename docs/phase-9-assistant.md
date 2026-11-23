@@ -72,6 +72,15 @@ memory…" until the model is ready. Measured on this machine with
 `llama3.1`: the first word after **1.9 s** with the model warm, versus
 **50 s** cold. The chat also shows a running seconds counter while it waits.
 
+### Never a silent fallback
+
+Before each answer the backend checks that Ollama is reachable. While Ollama
+is loading a model it can be slow to respond, so the check allows 5 s, and
+an "unreachable" result is cached for only 5 s (a successful model list is
+cached for 30 s). Whenever the rules answer instead of a model, the
+response's `note` says why (for example "Ollama was not reachable at …"),
+and the UI shows it under the answer.
+
 ## What the model receives
 
 - **System prompt:**

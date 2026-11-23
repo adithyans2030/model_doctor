@@ -34,6 +34,30 @@ export interface Dataset {
   columns?: ColumnProfile[];
   n_classes?: number | null;
   class_distribution?: ClassCount[] | null;
+  target_summary?: TargetSummary | null;
+}
+
+export interface TargetSummary {
+  n: number; mean: number; std: number; min: number; q1: number; median: number; q3: number; max: number;
+  skew: number; n_unique: number; all_non_negative: boolean;
+  histogram: { edges: number[]; counts: number[] };
+}
+
+export type Task = "classification" | "regression";
+
+export interface Scores {
+  primary_metric: "f1_macro" | "r2";
+  primary: number;
+  // classification
+  f1_macro?: number; accuracy?: number; balanced_accuracy?: number; roc_auc?: number | null;
+  // regression
+  r2?: number; rmse?: number; mae?: number; mape?: number | null;
+  worst_class: { label: string; recall: number; f1: number } | null;
+}
+
+export interface User {
+  id: string; email: string; name: string; role: "viewer" | "member" | "admin";
+  is_active: boolean; created_at: string; last_login_at: string | null;
 }
 
 export interface Finding {
@@ -82,7 +106,8 @@ export interface ModelSummary {
   stage: string;
   created_at: string;
   n_findings: number;
-  scores: { f1_macro: number; accuracy: number; balanced_accuracy: number; roc_auc: number | null; worst_class: any };
+  task: Task;
+  scores: Scores;
 }
 
 export interface ModelDetail extends ModelSummary {

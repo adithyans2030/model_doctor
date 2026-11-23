@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Query
 from pydantic import BaseModel, ConfigDict, model_validator
@@ -26,6 +26,7 @@ class ExplanationsOut(BaseModel):
 class ExplainRequest(BaseModel):
     row_id: int | None = None
     record: dict[str, Any] | None = None
+    method: Literal["auto", "shap", "lime"] = "auto"  # auto = SHAP if supported, else occlusion
 
     @model_validator(mode="after")
     def _one(self):
@@ -45,11 +46,12 @@ class ExplainOut(BaseModel):
 
     model_id: str
     row_id: int | None
-    actual: str | None
     in_test_sample: bool
-    prediction: str
-    confidence: float
-    probabilities: dict[str, float]
+    actual: str | float | None = None
+    prediction: str | float
+    confidence: float | None
+    probabilities: dict[str, float] | None
+    fidelity: float | None = None
     method: str
     units: str
     contributions: list[Contribution]
@@ -70,4 +72,4 @@ def explanations(model_id: str, db: DbDep, settings: SettingsDep, refresh: bool 
 def explain(model_id: str, body: ExplainRequest, db: DbDep, settings: SettingsDep):
     """Explain one prediction: a dataset row (`row_id`) or a new `record`."""
     model = get_model(db, model_id)
-    return svc.explain_prediction(db, settings, model, row_id=body.row_id, record=body.record)
+    return svc.explain_prediction(db, settings, model, row_id=body.row_id, record=body.record, method=body.method)

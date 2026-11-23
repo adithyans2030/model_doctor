@@ -18,7 +18,7 @@ def artifact_name(model_id: str) -> str:
 
 
 def save_bundle(models_dir: Path, model_id: str, *, pipeline, config: dict, spec: dict,
-                classes: list[str], positive_index: int | None) -> str:
+                classes: list[str], positive_index: int | None, task: str = "classification") -> str:
     models_dir.mkdir(parents=True, exist_ok=True)
     name = artifact_name(model_id)
     joblib.dump(
@@ -30,6 +30,7 @@ def save_bundle(models_dir: Path, model_id: str, *, pipeline, config: dict, spec
             "spec": spec,
             "classes": classes,
             "positive_index": positive_index,
+            "task": task,
         },
         models_dir / name,
         compress=3,

@@ -15,10 +15,10 @@
         { "color": "red", "value": null }, { "color": "orange", "value": 60 }, { "color": "green", "value": 85 } ] } } }
     },
     {
-      "id": 2, "type": "stat", "title": "Test macro-F1 (approved / production)",
+      "id": 2, "type": "stat", "title": "Test primary metric: macro-F1 or R² (approved / production)",
       "gridPos": { "x": 8, "y": 0, "w": 8, "h": 6 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "targets": [{ "expr": "modeldoctor_model_f1_macro", "legendFormat": "{{model}} ({{stage}})" }],
+      "targets": [{ "expr": "modeldoctor_model_primary_score", "legendFormat": "{{model}} ({{stage}}, {{metric}})" }],
       "fieldConfig": { "defaults": { "min": 0, "max": 1, "decimals": 3 } }
     },
     {

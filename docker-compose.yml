@@ -1,12 +1,15 @@
 # Full stack:  docker compose up --build
-#   Dashboard   http://localhost:3000
-#   API docs    http://localhost:8000/docs
+#   Dashboard   http://localhost:3000   (WEB_PORT)
+#   API docs    http://localhost:8000/docs   (API_PORT)
 #   MLflow      http://localhost:5000
 #   Prometheus  http://localhost:9090
 #   Grafana     http://localhost:3001  (dashboard "ModelDoctor", anonymous viewer)
 #
 # Secrets come from a .env file next to this one (see .env.example); nothing is hard-coded
 # except local-only development passwords.
+#
+# Running next to the local dev servers (which use 8000/3000)? Pick other host ports:
+#   API_PORT=8001 WEB_PORT=3002 docker compose up --build
 
 services:
   db:
@@ -38,7 +41,7 @@ services:
     environment:
       MD_DATABASE_URL: postgresql+psycopg://modeldoctor:${POSTGRES_PASSWORD:-modeldoctor}@db:5432/modeldoctor
       MD_MLFLOW_TRACKING_URI: http://mlflow:5000
-      MD_CORS_ORIGINS: '["http://localhost:3000"]'
+      MD_CORS_ORIGINS: '["http://localhost:${WEB_PORT:-3000}"]'
       MD_API_KEYS: ${MD_API_KEYS:-[]}
       # The assistant uses the Ollama running on your machine (outside Docker).
       MD_OLLAMA_URL: ${MD_OLLAMA_URL:-http://host.docker.internal:11434}
@@ -49,7 +52,7 @@ services:
     volumes:
       - api-data:/data
     ports:
-      - "8000:8000"
+      - "${API_PORT:-8000}:8000"
     depends_on:
       db:
         condition: service_healthy
@@ -60,9 +63,9 @@ services:
     build:
       context: ./frontend
       args:
-        VITE_API_URL: http://localhost:8000
+        VITE_API_URL: http://localhost:${API_PORT:-8000}
     ports:
-      - "3000:3000"
+      - "${WEB_PORT:-3000}:3000"
     depends_on:
       - api
 

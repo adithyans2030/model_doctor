@@ -1,0 +1,4 @@
+# Optional: enables the PyTorch neural-network algorithm (~2 GB). Not installed in the Docker image.
+-r requirements.txt
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch>=2.2

@@ -36,19 +36,44 @@ def answer_recall(ctx):
         m = next((m for m in ctx["models"] if m["id"] == ctx["selected_model"]["id"]), None)
         if m:
             mc = m["minority_class"]
+            if mc is None:
+                return answer_errors(ctx)
             lines.append(f"Recall for class '{mc['label']}' is {_pct(mc['recall'])}; no weak-class finding was raised.")
     if imb and not weak:
         lines.append(imb[0]["title"] + f" (ratio {imb[0]['evidence'].get('imbalance_ratio')}).")
     stmts = (ctx.get("explanations") or {}).get("error_statements") or []
     if stmts:
         lines.append("Where the misses happen: " + stmts[0])
-    if ctx["experiments"] and ctx["experiments"][0].get("improvement"):
+    if ctx["experiments"] and (ctx["experiments"][0].get("improvement") or {}).get("minority_recall") is not None:
         e = ctx["experiments"][0]
         lines.append(f"The latest experiment ({e['best']}) changed minority recall by "
                      f"{e['improvement']['minority_recall']:+.0%}.")
     elif "class_weight" in {r["intervention"] for r in ctx["recommendations"]}:
         lines.append("Try class-weighted training, SMOTE and threshold tuning (run an experiment to measure them).")
     return " ".join(lines) or "No recall problem has been diagnosed for this model.", _sources(used)
+
+
+def _improvement(imp: dict) -> str:
+    if imp.get("minority_recall") is not None:
+        return f"macro-F1 {imp.get('f1_macro', imp.get('primary', 0)):+.3f}, minority recall {imp['minority_recall']:+.0%}"
+    return f"R² {imp.get('r2', imp.get('primary', 0)):+.3f}, RMSE {imp.get('rmse', 0):+.4g}"
+
+
+def answer_errors(ctx):
+    """Regression: where and why the errors are large."""
+    checks = ("model.heteroscedastic_errors", "model.outlier_errors", "data.skewed_target", "model.no_skill",
+              "model.underfitting", "prediction.error_cluster", "prediction.large_error_concentration")
+    fs = _find(ctx, *checks)
+    sel = next((m for m in ctx["models"] if m["id"] == (ctx.get("selected_model") or {}).get("id")), None)
+    lines = []
+    if sel and sel.get("task") == "regression":
+        t = sel["test"]
+        lines.append(f"{sel['name']} has R² {t['r2']:.2f}, RMSE {t['rmse']:.4g} and MAE {t['mae']:.4g} on held-out data.")
+    lines += [f["title"] + "." + (f" Likely cause: {f['cause']}" if f.get("cause") else "") for f in fs[:3]]
+    stmts = (ctx.get("explanations") or {}).get("error_statements") or []
+    if stmts:
+        lines.append("Where the errors are: " + stmts[0])
+    return " ".join(lines) or "No error problems have been diagnosed for this model.", _sources(fs)
 
 
 def answer_priorities(ctx):
@@ -93,7 +118,8 @@ def answer_drift(ctx):
     text = f"Drift score {d['score']}/100 with {d['drifted_features']} drifted feature(s). Largest shifts: {top}."
     if d.get("performance"):
         p = d["performance"]
-        text += f" Macro-F1 on the labelled batch: {p['batch_f1_macro']:.2f} vs {p['test_f1_macro']:.2f} on test."
+        label = "R²" if p.get("metric") == "r2" else "Macro-F1"
+        text += f" {label} on the labelled batch: {p['batch_primary']:.2f} vs {p['test_primary']:.2f} on test."
     return text, _sources(_find(ctx, "distribution.feature_drift", "distribution.concept_drift"))
 
 
@@ -103,8 +129,7 @@ def answer_experiment(ctx):
     e = ctx["experiments"][0]
     kept = [t["name"] for t in e["trials"] if t["kept"]]
     return (f"Best configuration: {e['best']}. Kept steps: {', '.join(kept)}. "
-            f"Improvement vs baseline: macro-F1 {e['improvement']['f1_macro']:+.3f}, minority recall "
-            f"{e['improvement']['minority_recall']:+.0%}. {e['recommendation']}"), []
+            f"Improvement vs baseline: {_improvement(e['improvement'])}. {e['recommendation']}"), []
 
 
 def answer_features(ctx):
@@ -117,12 +142,14 @@ def answer_features(ctx):
 
 def answer_compare(ctx, a: dict, b: dict):
     rows = []
-    for k in ("f1_macro", "balanced_accuracy", "accuracy", "roc_auc"):
+    regression = a.get("task") == "regression"
+    for k in (("r2", "rmse", "mae") if regression else ("f1_macro", "balanced_accuracy", "accuracy", "roc_auc")):
         va, vb = a["test"].get(k), b["test"].get(k)
         if va is not None and vb is not None:
             rows.append(f"{k}: v{a['version']} {va:.3f} → v{b['version']} {vb:.3f} ({vb - va:+.3f})")
-    ra, rb = a["minority_class"]["recall"], b["minority_class"]["recall"]
-    rows.append(f"minority recall: {_pct(ra)} → {_pct(rb)}")
+    if not regression and a["minority_class"] and b["minority_class"]:
+        ra, rb = a["minority_class"]["recall"], b["minority_class"]["recall"]
+        rows.append(f"minority recall: {_pct(ra)} → {_pct(rb)}")
     resolved = sorted(set(a["checks"]) - set(b["checks"]))
     new = sorted(set(b["checks"]) - set(a["checks"]))
     if resolved:

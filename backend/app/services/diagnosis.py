@@ -86,6 +86,6 @@ def build_diagnosis(db: Session, settings: Settings, dataset: Dataset, model_id:
             "No model trained yet. Data findings are shown; train baselines to diagnose model health."
         ],
         "latest_experiment": experiment and {
-            k: experiment.get(k) for k in ("job_id", "best_model_id", "baseline_f1", "best")
+            k: experiment.get(k) for k in ("job_id", "best_model_id", "baseline_primary", "primary_metric", "best")
         },
     }

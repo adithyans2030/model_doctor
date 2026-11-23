@@ -56,7 +56,9 @@ class AssistantUnavailable(Exception):
 
 # ----------------------------------------------------------------------------- Ollama (local)
 _OLLAMA_CACHE: dict[str, tuple[float, list[dict] | None]] = {}
-_CACHE_SECONDS = 30
+_CACHE_SECONDS = 30  # a successful model list is reused this long
+_FAILURE_CACHE_SECONDS = 5  # an unreachable result is retried soon (Ollama may just be busy loading)
+_PROBE_TIMEOUT = 5.0  # Ollama answers slowly while it loads a model into memory
 
 
 def _http() -> httpx.Client:
@@ -68,11 +70,12 @@ def ollama_models(settings: Settings, *, fresh: bool = False) -> list[dict] | No
     """Installed local models, or None if Ollama isn't reachable. Cached briefly."""
     url = settings.ollama_url.rstrip("/")
     cached = _OLLAMA_CACHE.get(url)
-    if cached and not fresh and time.monotonic() - cached[0] < _CACHE_SECONDS:
+    ttl = _CACHE_SECONDS if cached and cached[1] is not None else _FAILURE_CACHE_SECONDS
+    if cached and not fresh and time.monotonic() - cached[0] < ttl:
         return cached[1]
     try:
         with _http() as client:
-            r = client.get(f"{url}/api/tags", timeout=2.0)
+            r = client.get(f"{url}/api/tags", timeout=_PROBE_TIMEOUT)
         r.raise_for_status()
         models = [
             {
@@ -94,7 +97,7 @@ def loaded_local_models(settings: Settings) -> list[str]:
     """Models Ollama currently holds in memory (``/api/ps``); empty if unknown."""
     try:
         with _http() as client:
-            r = client.get(f"{settings.ollama_url.rstrip('/')}/api/ps", timeout=2.0)
+            r = client.get(f"{settings.ollama_url.rstrip('/')}/api/ps", timeout=_PROBE_TIMEOUT)
         r.raise_for_status()
         return [m["name"] for m in r.json().get("models", [])]
     except (httpx.HTTPError, ValueError, KeyError, TypeError):
@@ -283,6 +286,8 @@ def answer(settings: Settings, question: str, ctx: dict, history: list[dict] | N
             note = f"AI unavailable ({exc}); answered from the diagnosis rules instead."
         except ImportError:
             note = "The anthropic package is not installed; answered from the diagnosis rules instead."
+    if note is None and provider == "rules" and settings.assistant_mode == "auto":
+        note = f"Ollama was not reachable at {settings.ollama_url}; answered from the diagnosis rules instead."
     return _rules(question, ctx, note)
 
 

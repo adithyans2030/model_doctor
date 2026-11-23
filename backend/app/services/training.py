@@ -9,12 +9,14 @@ from app.core.config import Settings
 from app.core.errors import DomainError, InvalidTargetError, NotFoundError
 from app.db.models import Dataset, Job, MLModel, new_id
 from app.diagnostics.model_doctor import diagnose_model
-from app.ml.algorithms import ALGORITHMS
+from app.ml.algorithms import ALGORITHMS, available_algorithms, default_algorithms, task_family
 from app.ml.artifacts import load_bundle, save_bundle
 from app.ml.evaluation import predict_labels
 from app.ml.features import FeatureSpec, prepare_frame
 from app.ml.pipeline import TrainConfig
-from app.ml.training import TrainingData, TrainResult, dummy_scores, prepare_training_data, train_and_evaluate
+from app.ml.training import (
+    TrainingData, TrainResult, dummy_scores, model_task, prepare_training_data, train_and_evaluate,
+)
 from app.services.datasets import get_dataset, load_dataframe
 from app.services import tracking
 from app.services.jobs import set_progress
@@ -33,15 +35,26 @@ def next_version(db: Session, project_id: str) -> int:
     return (current or 0) + 1
 
 
-def validate_train_request(dataset: Dataset, drop_columns: list[str]) -> None:
+def validate_train_request(dataset: Dataset, drop_columns: list[str], algorithms: list[str] | None = None) -> list[str]:
+    """Validate a training request and return the algorithms to train for the dataset's task."""
     if not dataset.target_column:
         raise InvalidTargetError("Select a target column before training.")
+    task = task_family(dataset.task_type)
     names = {c["name"] for c in dataset.columns}
     unknown = [c for c in drop_columns if c not in names]
     if unknown:
         raise DomainError(f"Unknown columns in drop_columns: {', '.join(unknown)}.", code="invalid_request")
     if dataset.target_column in drop_columns:
         raise DomainError("The target column can't be dropped.", code="invalid_request")
+    available = {a.key for a in available_algorithms(task)}
+    chosen = algorithms or default_algorithms(task)
+    bad = [a for a in chosen if a not in available]
+    if bad:
+        raise DomainError(
+            f"Not available for {task}: {', '.join(bad)}. Available: {', '.join(sorted(available))}.",
+            code="invalid_request",
+        )
+    return chosen
 
 
 def register_model(
@@ -53,7 +66,7 @@ def register_model(
     artifact = save_bundle(
         settings.models_dir, model_id,
         pipeline=result.pipeline, config=result.config.to_dict(), spec=result.spec.to_dict(),
-        classes=data.classes, positive_index=data.positive_index,
+        classes=data.classes, positive_index=data.positive_index, task=data.task,
     )
     model = MLModel(
         id=model_id,
@@ -79,14 +92,21 @@ def register_model(
     return model
 
 
-def leaderboard_row(m: MLModel) -> dict:
+def model_scores(m: MLModel) -> dict:
+    """Headline scores for lists and leaderboards (task-aware)."""
     t = m.metrics["test"]
-    return {
-        "model_id": m.id, "name": m.name, "version": m.version, "algorithm": m.algorithm,
-        "accuracy": t["accuracy"], "balanced_accuracy": t["balanced_accuracy"], "f1_macro": t["f1_macro"],
-        "roc_auc": t["roc_auc"], "worst_class": t["worst_class"],
-        "cv_f1_macro": (m.metrics.get("cv") or {}).get("val", {}).get("f1_macro"),
-    }
+    primary = m.metrics.get("primary_metric", "f1_macro")
+    if model_task(m.metrics) == "regression":
+        return {"primary_metric": primary, "primary": t["r2"], "r2": t["r2"], "rmse": t["rmse"], "mae": t["mae"],
+                "mape": t.get("mape"), "worst_class": None}
+    return {"primary_metric": primary, "primary": t["f1_macro"], "f1_macro": t["f1_macro"], "accuracy": t["accuracy"],
+            "balanced_accuracy": t["balanced_accuracy"], "roc_auc": t["roc_auc"], "worst_class": t["worst_class"]}
+
+
+def leaderboard_row(m: MLModel) -> dict:
+    cv = (m.metrics.get("cv") or {}).get("val", {}).get(m.metrics.get("primary_metric", "f1_macro"))
+    return {"model_id": m.id, "name": m.name, "version": m.version, "algorithm": m.algorithm,
+            **model_scores(m), "cv_primary": cv}
 
 
 def training_worker(db: Session, settings: Settings, job: Job) -> dict:
@@ -99,11 +119,12 @@ def training_worker(db: Session, settings: Settings, job: Job) -> dict:
     dummy = dummy_scores(data)
 
     models, skipped = [], []
-    for i, algo in enumerate(p["algorithms"], 1):
+    algorithms = p.get("algorithms") or default_algorithms(data.task)
+    for i, algo in enumerate(algorithms, 1):
         if algo == "svm" and len(data.y_train) > settings.svm_max_rows:
             skipped.append({"algorithm": algo, "reason": f"more than {settings.svm_max_rows} training rows"})
             continue
-        set_progress(db, job, f"Training {ALGORITHMS[algo].label} ({i}/{len(p['algorithms'])})")
+        set_progress(db, job, f"Training {ALGORITHMS[algo].label} ({i}/{len(algorithms)})")
         cfg = TrainConfig(algorithm=algo, drop_columns=p.get("drop_columns", []))
         result = train_and_evaluate(cfg, data, cv_folds=p["cv_folds"], n_jobs=settings.n_jobs, dummy=dummy)
         models.append(register_model(
@@ -116,11 +137,12 @@ def training_worker(db: Session, settings: Settings, job: Job) -> dict:
     return {
         "model_ids": [m.id for m in models],
         "best_model_id": best.id,
-        "leaderboard": sorted((leaderboard_row(m) for m in models), key=lambda r: -r["f1_macro"]),
+        "leaderboard": sorted((leaderboard_row(m) for m in models), key=lambda r: -r["primary"]),
         "skipped": skipped,
         "split": data.split_info(),
         "dummy": dummy,
-        "primary_metric": "f1_macro",
+        "task": data.task,
+        "primary_metric": data.primary,
     }
 
 
@@ -136,7 +158,10 @@ def predict_records(settings: Settings, model: MLModel, records: list[dict]) -> 
     missing = [c for c in spec.features if c not in df.columns]
     if missing:
         raise DomainError(f"Records are missing feature columns: {', '.join(missing)}.", code="invalid_request")
-    proba = bundle["pipeline"].predict_proba(prepare_frame(df, spec))
+    X = prepare_frame(df, spec)
+    if bundle.get("task") == "regression":
+        return [{"prediction": round(float(v), 6)} for v in bundle["pipeline"].predict(X)]
+    proba = bundle["pipeline"].predict_proba(X)
     pred = predict_labels(proba, bundle["positive_index"], bundle["config"].get("threshold"))
     classes = bundle["classes"]
     return [

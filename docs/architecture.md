@@ -113,9 +113,9 @@ backend/
     monitoring/      drift, metrics
     services/        use cases (datasets, reports, training, explanations, experiments,
                      registry, monitoring, jobs, tracking, diagnosis)
-  alembic/           migrations 0001–0004
+  alembic/           migrations 0001–0005
   scripts/           make_demo_data.py, run_pipeline.py
-  tests/             107 pytest tests
+  tests/             128 pytest tests (+ 8 Vitest, 3 Playwright)
 frontend/            React + Vite + Tailwind dashboard
 deploy/              Prometheus + Grafana provisioning
 docs/                this documentation

@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 InferredType = Literal[
     "numeric", "categorical", "boolean", "datetime", "text", "id", "empty"
 ]
-TaskType = Literal["binary_classification", "multiclass_classification"]
+TaskType = Literal["binary_classification", "multiclass_classification", "regression"]
 
 
 class ProjectCreate(BaseModel):
@@ -72,6 +72,7 @@ class DatasetOut(DatasetSummary):
     columns: list[ColumnProfile]
     n_classes: int | None
     class_distribution: list[ClassCount] | None
+    target_summary: dict[str, Any] | None = None
 
 
 class DatasetPreview(BaseModel):
@@ -139,14 +140,14 @@ class DataReportOut(BaseModel):
 
 
 # ----------------------------------------------------------------------------- Phase 3
-AlgorithmKey = Literal["logistic_regression", "random_forest", "xgboost", "svm"]
+AlgorithmKey = Literal["logistic_regression", "ridge", "random_forest", "xgboost", "lightgbm", "svm", "pytorch_mlp"]
 JobStatus = Literal["queued", "running", "completed", "failed"]
 Stage = Literal["candidate", "approved", "production", "rejected", "archived"]
 
 
 class TrainRequest(BaseModel):
-    algorithms: list[AlgorithmKey] = Field(
-        default_factory=lambda: ["logistic_regression", "random_forest", "xgboost", "svm"], min_length=1
+    algorithms: list[AlgorithmKey] | None = Field(
+        default=None, description="Defaults to the standard algorithms for the dataset's task", min_length=1
     )
     cv_folds: int = Field(5, ge=0, le=10, description="0 disables cross-validation")
     test_size: float = Field(0.2, ge=0.1, le=0.4)
@@ -156,7 +157,7 @@ class TrainRequest(BaseModel):
     @field_validator("algorithms")
     @classmethod
     def _unique(cls, v):
-        return list(dict.fromkeys(v))
+        return None if v is None else list(dict.fromkeys(v))
 
     @field_validator("cv_folds")
     @classmethod
@@ -195,6 +196,7 @@ class ModelSummary(BaseModel):
     source: str
     stage: Stage
     created_at: datetime
+    task: str = "classification"
     scores: dict[str, Any]
     n_findings: int
 
@@ -212,9 +214,9 @@ class PredictRequest(BaseModel):
 
 
 class Prediction(BaseModel):
-    prediction: str
-    confidence: float
-    probabilities: dict[str, float]
+    prediction: str | float
+    confidence: float | None = None
+    probabilities: dict[str, float] | None = None
 
 
 class PredictResponse(BaseModel):

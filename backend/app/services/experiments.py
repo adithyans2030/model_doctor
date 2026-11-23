@@ -50,8 +50,9 @@ def experiment_worker(db: Session, settings: Settings, job: Job) -> dict:
         db.commit()
         best_summary.update(model_id=best_model.id, version=best_model.version)
 
-    base_f1 = base_model.metrics["test"]["f1_macro"]
-    improved = best_model is not None and best.result.metrics["test"]["f1_macro"] > base_f1
+    primary = base_model.metrics.get("primary_metric", "f1_macro")
+    base_score = base_model.primary_score
+    improved = best_model is not None and best.result.metrics["test"][primary] > base_score
     if best_model is None:
         recommendation = "No intervention beat the current model on cross-validation; keep it."
     elif improved:
@@ -62,8 +63,10 @@ def experiment_worker(db: Session, settings: Settings, job: Job) -> dict:
                           "than the original only because the original relied on a leaking feature.")
     return {
         "base_model_id": base_model.id,
-        "base_model_f1": base_f1,
-        "baseline_f1": baseline.result.metrics["test"]["f1_macro"],
+        "task": data.task,
+        "primary_metric": primary,
+        "base_model_primary": base_score,
+        "baseline_primary": baseline.result.metrics["test"][primary],
         "plan": out["plan"],
         "trials": trials,
         "best": best_summary,

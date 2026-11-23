@@ -28,7 +28,8 @@ def _mlflow(settings: Settings):
 
 
 def _flat_metrics(test: dict) -> dict[str, float]:
-    keys = ["accuracy", "balanced_accuracy", "f1_macro", "f1_weighted", "roc_auc", "pr_auc", "log_loss", "ece"]
+    keys = ["accuracy", "balanced_accuracy", "f1_macro", "f1_weighted", "roc_auc", "pr_auc", "log_loss", "ece",
+            "r2", "rmse", "mae", "mape"]
     return {k: float(test[k]) for k in keys if test.get(k) is not None}
 
 
@@ -66,7 +67,7 @@ def log_experiment(settings: Settings, job_id: str, base_model, trials: list[dic
                 with mlflow.start_run(run_name=t["name"], nested=True):
                     mlflow.log_params(_params(t["config"]))
                     mlflow.log_metrics({**{k: float(v) for k, v in t["metrics"].items() if v is not None},
-                                        "cv_f1_macro": float(t["cv_f1_macro"])})
+                                        "cv_primary": float(t["cv_primary"])})
                     mlflow.set_tag("kept", str(t["kept"]))
             mlflow.set_tag("modeldoctor.parent_run", parent.info.run_id)
     except Exception:  # noqa: BLE001

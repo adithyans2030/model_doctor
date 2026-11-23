@@ -1,11 +1,13 @@
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { Assistant } from "@/components/Assistant";
-import { Bars, ConfusionMatrix, DivergingBars, ThresholdChart } from "@/components/charts";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { Bars, ConfusionMatrix, DivergingBars, Histogram, ScatterChart, ThresholdChart } from "@/components/charts";
 import {
   Crumbs, Empty, ErrorBox, FindingsList, Loading, Section, SeverityBadge, Spinner, StageBadge, Stat, Tabs, cx,
 } from "@/components/ui";
 import { api, fmt } from "@/lib/api";
+import { isAdmin, useAuth } from "@/lib/auth";
 import { useJob, useResource } from "@/lib/hooks";
 import type { Job, ModelDetail, ModelSummary } from "@/lib/types";
 
@@ -38,7 +40,7 @@ export default function ModelPage() {
       {tab === "experiments" && <Experiments m={m} />}
       {tab === "registry" && <Registry m={m} onChanged={model.reload} />}
       {tab === "monitoring" && <Monitoring m={m} />}
-      {tab === "assistant" && <Assistant datasetId={m.dataset_id} modelId={m.id} />}
+      {tab === "assistant" && <ErrorBoundary label="the assistant"><Assistant datasetId={m.dataset_id} modelId={m.id} /></ErrorBoundary>}
     </div>
   );
 }
@@ -55,7 +57,42 @@ function describe(c: Record<string, any>) {
   return parts.join(" · ");
 }
 
+function RegressionPerformance({ m }: { m: ModelDetail }) {
+  const t = m.metrics.test;
+  const cv = m.metrics.cv;
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <Stat label="R² (primary)" value={fmt.num(t.r2)} sub={cv?.val?.r2 ? `CV ${fmt.num(cv.val.r2.mean)} ± ${fmt.num(cv.val.r2.std)}` : "no CV"} />
+        <Stat label="RMSE" value={fmt.sig(t.rmse)} sub={`mean-only baseline ${fmt.sig(m.metrics.dummy?.rmse)}`} />
+        <Stat label="MAE / MEDIAN AE" value={`${fmt.sig(t.mae)} / ${fmt.sig(t.median_ae)}`} sub={t.mape != null ? `MAPE ${fmt.pct(t.mape, 1)}` : "MAPE n/a (zeros in target)"} />
+        <Stat label="ERROR PROFILE" value={fmt.pct(t.top5pct_error_share)} sub="share of total error from the worst 5% of rows" />
+      </div>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Section title="Diagnosis"><FindingsList findings={m.findings} empty="No model-level problems found." /></Section>
+        <div className="space-y-4">
+          <Section title="Predicted vs actual (test sample)">
+            <ScatterChart points={t.points} />
+          </Section>
+          <Section title="Residuals (actual − predicted)">
+            <Histogram edges={t.residual_histogram.edges} counts={t.residual_histogram.counts} />
+            <p className="mt-1 text-xs text-fg-3">
+              Mean residual {fmt.sig(t.residual_mean)} (bias) · std {fmt.sig(t.residual_std)} · error-vs-prediction correlation {fmt.num(t.error_vs_prediction_corr, 2)}
+            </p>
+          </Section>
+        </div>
+      </div>
+      {m.importances && (
+        <Section title="Model-native feature importance">
+          <Bars items={m.importances.map((i) => ({ label: i.feature, value: i.importance }))} format={(v) => fmt.pct(v, 1)} />
+        </Section>
+      )}
+    </div>
+  );
+}
+
 function Performance({ m }: { m: ModelDetail }) {
+  if (m.task === "regression") return <RegressionPerformance m={m} />;
   const t = m.metrics.test;
   const cv = m.metrics.cv;
   return (
@@ -106,13 +143,15 @@ function Performance({ m }: { m: ModelDetail }) {
 function Explain({ m }: { m: ModelDetail }) {
   const ex = useResource<any>(`/models/${m.id}/explanations`);
   const [row, setRow] = useState("");
+  const [method, setMethod] = useState<"auto" | "lime">("auto");
   const [local, setLocal] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
+  const regression = m.task === "regression";
 
-  async function explain(rowId: number) {
+  async function explain(rowId: number, how = method) {
     setError(null);
     try {
-      setLocal(await api(`/models/${m.id}/explain`, { json: { row_id: rowId } }));
+      setLocal(await api(`/models/${m.id}/explain`, { json: { row_id: rowId, method: how } }));
     } catch (e) {
       setError((e as Error).message);
     }
@@ -128,26 +167,28 @@ function Explain({ m }: { m: ModelDetail }) {
         <Section title="What drives the model">
           {g.shap ? (
             <>
-              <p className="mb-2 text-xs text-fg-3">{g.shap.method}: mean |SHAP| for class '{g.shap.explained_class}'</p>
+              <p className="mb-2 text-xs text-fg-3">{g.shap.method}: mean |SHAP| {regression ? "on the prediction" : `for class '${g.shap.explained_class}'`}</p>
               <Bars items={g.shap.values.map((v: any) => ({ label: v.feature, value: v.mean_abs_shap }))} />
             </>
           ) : <p className="text-xs text-fg-3">SHAP isn't available for this model type; permutation importance below is model-agnostic.</p>}
-          <p className="mt-4 mb-2 text-xs text-fg-3">Permutation importance: drop in macro-F1 when a feature is shuffled (baseline {g.permutation.baseline})</p>
+          <p className="mt-4 mb-2 text-xs text-fg-3">Permutation importance: drop in {regression ? "R²" : "macro-F1"} when a feature is shuffled (baseline {g.permutation.baseline})</p>
           <Bars items={g.permutation.values.map((v: any) => ({ label: v.feature, value: Math.max(0, v.importance), note: `± ${v.std}` }))} />
         </Section>
         <Section title="Where the errors are">
           <div className="mb-2 text-[13px] text-fg-2">
-            {ea.summary.n_errors} errors of {ea.summary.n_test} ({fmt.pct(ea.summary.error_rate, 1)})
-            {ea.summary.false_negatives != null && ` · ${ea.summary.false_negatives} false negatives · ${ea.summary.false_positives} false positives`}
+            {regression
+              ? `Mean absolute error ${fmt.sig(ea.summary.mae)} on ${ea.summary.n_test} test rows · "large error" = above ${fmt.sig(ea.summary.large_error_threshold)}`
+              : `${ea.summary.n_errors} errors of ${ea.summary.n_test} (${fmt.pct(ea.summary.error_rate, 1)})`}
+            {!regression && ea.summary.false_negatives != null && ` · ${ea.summary.false_negatives} false negatives · ${ea.summary.false_positives} false positives`}
           </div>
           <div className="space-y-1.5">{ea.statements.map((s: string) => <div key={s} className="notice text-[13px]">{s}</div>)}</div>
           {ea.slices.length > 0 && (
             <div className="mt-3 overflow-x-auto">
               <table className="tbl">
-                <thead><tr><th>Slice</th><th className="num">Rows</th><th className="num">Error rate</th><th className="num">Lift</th></tr></thead>
+                <thead><tr><th>Slice</th><th className="num">Rows</th><th className="num">{regression ? "MAE" : "Error rate"}</th><th className="num">Lift</th></tr></thead>
                 <tbody>{ea.slices.slice(0, 8).map((s: any) => (
                   <tr key={s.feature + s.value}><td>{s.feature} = {s.value}</td><td className="num">{s.n}</td>
-                    <td className="num">{fmt.pct(s.error_rate)}</td><td className="num">{s.lift}×</td></tr>
+                    <td className="num">{regression ? fmt.sig(s.mae) : fmt.pct(s.error_rate)}</td><td className="num">{s.lift}×</td></tr>
                 ))}</tbody>
               </table>
             </div>
@@ -156,20 +197,33 @@ function Explain({ m }: { m: ModelDetail }) {
       </div>
       <div className="grid gap-4 lg:grid-cols-2">
         <Section title="Explain a prediction">
-          <select className="field w-full" value={row} onChange={(e) => { setRow(e.target.value); if (e.target.value) explain(+e.target.value); }}>
-            <option value="">Pick a test row…</option>
-            {ex.data.samples.map((s: any) => (
-              <option key={s.row_id} value={s.row_id}>
-                row {s.row_id}: true {s.true}, predicted {s.predicted} ({fmt.pct(s.confidence)}){s.correct ? "" : " ✗"}
-              </option>
-            ))}
-          </select>
+          <div className="flex flex-wrap gap-2">
+            <select className="field min-w-0 flex-1" value={row} onChange={(e) => { setRow(e.target.value); if (e.target.value) explain(+e.target.value); }}>
+              <option value="">Pick a test row…</option>
+              {ex.data.samples.map((s: any) => (
+                <option key={s.row_id} value={s.row_id}>
+                  {regression
+                    ? `row ${s.row_id}: actual ${fmt.sig(s.true)}, predicted ${fmt.sig(s.predicted)} (error ${fmt.sig(s.abs_error)})`
+                    : `row ${s.row_id}: true ${s.true}, predicted ${s.predicted} (${fmt.pct(s.confidence)})${s.correct ? "" : " ✗"}`}
+                </option>
+              ))}
+            </select>
+            <select className="field" value={method} aria-label="Explanation method"
+              onChange={(e) => { const v = e.target.value as "auto" | "lime"; setMethod(v); if (row) explain(+row, v); }}>
+              <option value="auto">SHAP (or occlusion)</option>
+              <option value="lime">LIME</option>
+            </select>
+          </div>
           <ErrorBox error={error} />
           {local && (
             <div className="mt-3">
               <p className="font-semibold">{local.explanation}</p>
-              <p className="mb-2 text-xs text-fg-3">Actual: {local.actual ?? "unknown"} · method: {local.method} ({local.units})</p>
-              <DivergingBars posLabel={`towards '${local.prediction}'`} negLabel="away from it"
+              <p className="mb-2 text-xs text-fg-3">
+                Actual: {local.actual == null ? "unknown" : regression ? fmt.sig(local.actual) : local.actual} · method: {local.method} ({local.units})
+                {local.fidelity != null && ` · local fit (fidelity) ${fmt.num(local.fidelity, 2)}`}
+              </p>
+              <DivergingBars posLabel={regression ? "pushes the prediction up" : `towards '${local.prediction}'`}
+                negLabel={regression ? "pushes it down" : "away from it"}
                 items={local.contributions.slice(0, 10).map((c: any) => ({ label: c.feature, value: c.contribution, detail: c.value }))} />
             </div>
           )}
@@ -177,12 +231,19 @@ function Explain({ m }: { m: ModelDetail }) {
         <Section title="Group performance">
           {fair.features.length === 0 ? <Empty>No categorical groups large enough to compare.</Empty> : (
             <div className="space-y-3">
-              <p className="text-[13px] text-fg-2">Largest balanced-accuracy gap: <b>{fmt.num(fair.max_gap)}</b> across '{fair.worst_feature}'.</p>
+              <p className="text-[13px] text-fg-2">
+                {regression ? "Largest gap in mean absolute error, relative to the overall error" : "Largest balanced-accuracy gap"}:{" "}
+                <b>{fmt.num(fair.max_gap)}</b> across '{fair.worst_feature}'.
+              </p>
               {fair.features.slice(0, 3).map((f: any) => (
                 <div key={f.feature}>
                   <div className="text-[13px]"><b>{f.feature}</b> <span className="text-fg-3">gap {f.gap}</span></div>
-                  <Bars max={1} items={f.groups.filter((r: any) => r.balanced_accuracy != null).map((r: any) => (
-                    { label: r.value, value: r.balanced_accuracy, note: `${r.n} rows · positive recall ${fmt.pct(r.positive_recall)}` }))} />
+                  {regression ? (
+                    <Bars format={(v) => fmt.sig(v)} items={f.groups.map((r: any) => ({ label: r.value, value: r.mae, note: `${r.n} rows · R² ${fmt.num(r.r2, 2)}` }))} />
+                  ) : (
+                    <Bars max={1} items={f.groups.filter((r: any) => r.balanced_accuracy != null).map((r: any) => (
+                      { label: r.value, value: r.balanced_accuracy, note: `${r.n} rows · positive recall ${fmt.pct(r.positive_recall)}` }))} />
+                  )}
                 </div>
               ))}
             </div>
@@ -215,8 +276,8 @@ function Experiments({ m }: { m: ModelDetail }) {
     <div className="space-y-4">
       <Section title="Automated corrective experiments">
         <p className="mb-3 text-[13px] text-fg-2">
-          ModelDoctor turns the diagnosis into a plan, runs each fix, and keeps a step only if it improves <b>cross-validated</b> macro-F1
-          on training data. The test set is only used to report results.
+          ModelDoctor turns the diagnosis into a plan, runs each fix, and keeps a step only if it improves the <b>cross-validated</b>{" "}
+          {m.task === "regression" ? "R²" : "macro-F1"} on training data. The test set is only used to report results.
         </p>
         <div className="flex flex-wrap items-center gap-3">
           <select className="field" value={budget} onChange={(e) => setBudget(e.target.value)}>
@@ -233,20 +294,27 @@ function Experiments({ m }: { m: ModelDetail }) {
         <Section title="Latest result">
           <div className="notice mb-3">
             <b>{r.best.description}</b><br />
-            Macro-F1 {fmt.num(r.baseline_f1)} → {fmt.num(r.best.metrics.f1_macro)} ({r.improvement.f1_macro >= 0 ? "+" : ""}{fmt.num(r.improvement.f1_macro)}) ·
-            minority recall {fmt.pct(r.best.metrics.minority_recall - r.improvement.minority_recall)} → {fmt.pct(r.best.metrics.minority_recall)}
+            {r.task === "regression" ? (
+              <>R² {fmt.num(r.baseline_primary)} → {fmt.num(r.best.metrics.r2)} · RMSE {fmt.sig(r.best.metrics.rmse - r.improvement.rmse)} → {fmt.sig(r.best.metrics.rmse)}</>
+            ) : (
+              <>Macro-F1 {fmt.num(r.baseline_primary)} → {fmt.num(r.best.metrics.f1_macro)} ({r.improvement.primary >= 0 ? "+" : ""}{fmt.num(r.improvement.primary)}) ·
+              minority recall {fmt.pct(r.best.metrics.minority_recall - r.improvement.minority_recall)} → {fmt.pct(r.best.metrics.minority_recall)}</>
+            )}
             <div className="mt-1.5 text-[13px]">{r.recommendation}</div>
             {r.best_model_id && <Link to={`/models/${r.best_model_id}`} className="mt-1.5 inline-block">Open candidate model v{r.best.version} →</Link>}
           </div>
           {r.plan.notes.map((n: string) => <p key={n} className="text-xs text-fg-3">{n}</p>)}
           <div className="overflow-x-auto">
             <table className="tbl">
-              <thead><tr><th>Step</th><th>Trial</th><th className="num">CV macro-F1 (selection)</th><th className="num">Test macro-F1</th><th className="num">Minority recall</th><th>Decision</th></tr></thead>
+              <thead><tr><th>Step</th><th>Trial</th>
+                <th className="num">CV {r.task === "regression" ? "R²" : "macro-F1"} (selection)</th>
+                <th className="num">Test {r.task === "regression" ? "R²" : "macro-F1"}</th>
+                <th className="num">{r.task === "regression" ? "Test RMSE" : "Minority recall"}</th><th>Decision</th></tr></thead>
               <tbody>{r.trials.map((t: any) => (
                 <tr key={t.step}>
                   <td>{t.step}</td><td>{t.name}</td>
-                  <td className="num">{fmt.num(t.cv_f1_macro)}</td><td className="num">{fmt.num(t.metrics.f1_macro)}</td>
-                  <td className="num">{fmt.pct(t.metrics.minority_recall)}</td>
+                  <td className="num">{fmt.num(t.cv_primary)}</td><td className="num">{fmt.num(t.metrics.primary)}</td>
+                  <td className="num">{r.task === "regression" ? fmt.sig(t.metrics.rmse) : fmt.pct(t.metrics.minority_recall)}</td>
                   <td className="text-xs">
                     {t.kept
                       ? <span className="inline-flex items-center gap-1 font-semibold"><span className="size-2 rounded-full bg-good" />✓ kept</span>
@@ -274,6 +342,8 @@ const NEXT: Record<string, [string, string][]> = {
 };
 
 function Registry({ m, onChanged }: { m: ModelDetail; onChanged: () => void }) {
+  const { user, status } = useAuth();
+  const admin = isAdmin(user, status);
   const events = useResource<any[]>(`/models/${m.id}/events`);
   const siblings = useResource<ModelSummary[]>(`/datasets/${m.dataset_id}/models`);
   const [note, setNote] = useState("");
@@ -314,7 +384,10 @@ function Registry({ m, onChanged }: { m: ModelDetail; onChanged: () => void }) {
           <textarea className="field w-full resize-y" placeholder="Note (required to approve, reject or promote)" rows={2} value={note} onChange={(e) => setNote(e.target.value)} />
           <div className="flex flex-wrap gap-2">
             {NEXT[m.stage].map(([s, label]) => (
-              <button key={s} className={cx("btn", (s === "production" || s === "approved") && "btn-primary")} onClick={() => move(s)}>{label}</button>
+              <button key={s} className={cx("btn", (s === "production" || s === "approved") && "btn-primary")}
+                disabled={!admin && (s === "production" || s === "approved")}
+                title={!admin && (s === "production" || s === "approved") ? "Only admins can approve or promote models" : undefined}
+                onClick={() => move(s)}>{label}</button>
             ))}
           </div>
           <ErrorBox error={error} />
@@ -389,10 +462,10 @@ function Monitoring({ m }: { m: ModelDetail }) {
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <Stat label="DRIFT SCORE" value={latest.score} sub="100 = no drift" />
             <Stat label="DRIFTED FEATURES" value={`${latest.drifted_features} / ${latest.n_features}`} sub={`PSI ≥ ${latest.thresholds.psi_moderate}`} />
-            <Stat label="PREDICTION MIX SHIFT" value={fmt.num(latest.prediction_drift.psi, 2)} sub="PSI of predicted classes vs test" />
+            <Stat label="PREDICTION MIX SHIFT" value={fmt.num(latest.prediction_drift.psi, 2)} sub={latest.prediction_drift.kind === "values" ? "PSI of predicted values vs test" : "PSI of predicted classes vs test"} />
             {latest.performance && (
-              <Stat label="BATCH MACRO-F1" value={fmt.num(latest.performance.batch_f1_macro)}
-                sub={`test ${fmt.num(latest.performance.test_f1_macro)} (Δ ${fmt.num(latest.performance.delta_f1_macro)})`} />
+              <Stat label={`BATCH ${latest.performance.metric === "r2" ? "R²" : "MACRO-F1"}`} value={fmt.num(latest.performance.batch_primary)}
+                sub={`test ${fmt.num(latest.performance.test_primary)} (Δ ${fmt.num(latest.performance.delta_primary)})`} />
             )}
           </div>
           <div className="grid gap-4 lg:grid-cols-2">

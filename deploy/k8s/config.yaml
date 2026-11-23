@@ -1,0 +1,19 @@
+# Non-secret settings. Secrets live in the "modeldoctor-secrets" Secret, which is NOT in
+# this repo: create it with (values are examples):
+#
+#   kubectl -n modeldoctor create secret generic modeldoctor-secrets \
+#     --from-literal=POSTGRES_PASSWORD='change-me' \
+#     --from-literal=MD_DATABASE_URL='postgresql+psycopg://modeldoctor:change-me@postgres:5432/modeldoctor' \
+#     --from-literal=MD_SECRET_KEY="$(openssl rand -base64 48)" \
+#     --from-literal=MD_API_KEYS='[]'
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: modeldoctor-config
+data:
+  MD_AUTH_REQUIRED: "true"            # sign-in required in a shared deployment
+  MD_OPEN_REGISTRATION: "false"       # first account becomes admin; admins add the rest
+  MD_CORS_ORIGINS: '["https://modeldoctor.example.com"]'
+  MD_ASSISTANT_MODE: "auto"           # Ollama if reachable, else rule-based answers
+  MD_OLLAMA_URL: "http://ollama:11434"
+  MD_RATE_LIMIT_PER_MINUTE: "300"

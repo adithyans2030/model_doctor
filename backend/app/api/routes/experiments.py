@@ -5,6 +5,7 @@ from pydantic import BaseModel, ConfigDict, field_validator
 from sqlalchemy import select
 
 from app.api.deps import DbDep, SettingsDep
+from app.core.errors import DomainError
 from app.db.models import Job
 from app.diagnostics.findings import INTERVENTIONS
 from app.schemas import JobOut
@@ -37,6 +38,9 @@ def start_experiment(model_id: str, body: ExperimentRequest, request: Request, b
                      db: DbDep, settings: SettingsDep):
     """Run the corrective experiments the diagnosis recommends. Poll `GET /jobs/{id}`."""
     model = get_model(db, model_id)
+    if model.source == "uploaded":
+        raise DomainError("Experiments retrain the model, so they need a ModelDoctor-trained model. "
+                          "Train baselines on this dataset and optimise one of those.", code="invalid_request")
     dataset = get_dataset(db, model.dataset_id)
     job = job_svc.create_job(db, dataset, "experiment", {"base_model_id": model.id, **body.model_dump()})
     background.add_task(job_svc.run_job, request.app.state.session_factory, settings, job.id, experiment_worker)

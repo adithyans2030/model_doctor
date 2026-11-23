@@ -104,7 +104,9 @@ def test_training_job_and_leaderboard(client, churn_dataset, settings):
     job = train(client, churn_dataset["id"])
     res = job["result"]
     assert len(res["model_ids"]) == 2 and res["split"]["n_test"] == 404
+    assert res["task"] == "classification" and res["primary_metric"] == "f1_macro"
     f1s = [r["f1_macro"] for r in res["leaderboard"]]
+    assert all(r["primary"] == r["f1_macro"] for r in res["leaderboard"])
     assert f1s == sorted(f1s, reverse=True) and res["best_model_id"] == res["leaderboard"][0]["model_id"]
     assert res["dummy"]["balanced_accuracy"] == 0.5
     assert len(list(settings.models_dir.iterdir())) == 2

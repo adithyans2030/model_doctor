@@ -27,6 +27,12 @@ def _has(data_findings, check):
 
 
 def diagnose_model(metrics: dict, importances: list[dict] | None, data_findings: list[dict]) -> list[dict]:
+    if metrics.get("task") == "regression":
+        return diagnose_regression(metrics, importances, data_findings)
+    return _diagnose_classification(metrics, importances, data_findings)
+
+
+def _diagnose_classification(metrics: dict, importances: list[dict] | None, data_findings: list[dict]) -> list[dict]:
     out: list[dict] = []
     test, cv, train, dummy = metrics["test"], metrics.get("cv"), metrics["train"], metrics.get("dummy")
     f1 = test["f1_macro"]
@@ -144,4 +150,98 @@ def diagnose_model(metrics: dict, importances: list[dict] | None, data_findings:
             interventions=["drop_leaky_features"] if dominant_is_leak else [],
             columns=[top["feature"]] if top else []))
 
+    return sort_findings(out)
+
+
+# ----------------------------------------------------------------------------- regression
+UNDERFIT_R2 = 0.5
+NO_SKILL_R2 = 0.05
+SUSPICIOUS_R2 = 0.99
+HETERO_WARN = 0.3
+TOP_ERROR_SHARE = 0.25  # the worst 5% of rows causing >= 25% of all absolute error
+
+
+def diagnose_regression(metrics: dict, importances: list[dict] | None, data_findings: list[dict]) -> list[dict]:
+    out: list[dict] = []
+    test, cv, train = metrics["test"], metrics.get("cv"), metrics["train"]
+    r2 = test["r2"]
+    if cv and cv["val"].get("r2") and cv["train"].get("r2"):
+        train_r2, val_r2, std = cv["train"]["r2"]["mean"], cv["val"]["r2"]["mean"], cv["val"]["r2"]["std"]
+        source = f"{cv['folds']}-fold CV"
+    else:
+        train_r2, val_r2, std, source = train["r2"], r2, None, "train vs test"
+    gap = round(train_r2 - val_r2, 4)
+
+    if gap >= OVERFIT_WARN:
+        out.append(finding(
+            "model.overfitting", "model", "critical" if gap >= OVERFIT_CRIT else "warning",
+            f"Overfitting: training R² exceeds validation R² by {gap:.2f}",
+            {"train_r2": train_r2, "validation_r2": val_r2, "gap": gap, "source": source},
+            cause="The model memorises training data (too complex, too little data, or noisy/duplicated rows).",
+            impact="Errors on new data will be larger than training suggests.",
+            recommendation="Regularise (shallower trees, stronger alpha) and tune hyperparameters.",
+            interventions=["hyperparameter_tuning"]))
+    if std is not None and std >= CV_STD_WARN:
+        out.append(finding(
+            "model.high_variance", "model", "warning", f"Unstable performance across folds (R² std = {std:.3f})",
+            {"cv_r2_std": std, "cv_r2_mean": val_r2},
+            cause="Results depend heavily on which rows are in the training set; often small data or outliers.",
+            recommendation="Collect more data, simplify the model, or use repeated cross-validation for decisions."))
+
+    if r2 <= NO_SKILL_R2:
+        out.append(finding(
+            "model.no_skill", "model", "critical",
+            f"Model is barely better than always predicting the mean (R² = {r2:.2f})",
+            {"r2": r2, "baseline_r2": 0.0, "rmse": test["rmse"], "baseline_rmse": (metrics.get("dummy") or {}).get("rmse")},
+            cause="Features carry little signal for the target, or the target needs transforming.",
+            recommendation="Check feature relevance; try a log transform of a skewed target.",
+            interventions=["target_transform"] if _has(data_findings, "data.skewed_target") else []))
+    elif train_r2 < UNDERFIT_R2 and val_r2 < UNDERFIT_R2:
+        out.append(finding(
+            "model.underfitting", "model", "warning",
+            f"Underfitting: low R² on both training ({train_r2:.2f}) and validation ({val_r2:.2f})",
+            {"train_r2": train_r2, "validation_r2": val_r2},
+            cause="The model is too simple for the pattern, or the features don't contain enough signal.",
+            recommendation="Try a more flexible model, engineer features, or tune hyperparameters.",
+            interventions=["hyperparameter_tuning"]))
+
+    hetero = test.get("error_vs_prediction_corr")
+    skewed = _has(data_findings, "data.skewed_target")
+    if hetero is not None and hetero >= HETERO_WARN:
+        out.append(finding(
+            "model.heteroscedastic_errors", "model", "warning",
+            f"Errors grow with the predicted value (correlation {hetero:.2f})",
+            {"error_vs_prediction_corr": hetero},
+            cause=("The target is skewed, so large values dominate the squared error." if skewed
+                   else "The model is less accurate for large values than small ones."),
+            impact="Predictions for high-value cases are much less reliable than the average error suggests.",
+            recommendation="Model log(target) or use a relative-error metric.",
+            interventions=["target_transform"] if skewed else []))
+
+    share = test.get("top5pct_error_share")
+    if share is not None and share >= TOP_ERROR_SHARE:
+        out.append(finding(
+            "model.outlier_errors", "model", "warning",
+            f"5% of rows cause {share:.0%} of the total absolute error",
+            {"top5pct_error_share": share},
+            cause="A few unusual rows (outliers in the target or features) are very hard to predict.",
+            recommendation="Inspect the largest errors; check for data errors or a missing segment feature."))
+
+    leak = _has(data_findings, "feature.leakage")
+    top = importances[0] if importances else None
+    suspicious = r2 >= SUSPICIOUS_R2
+    if suspicious or (top and top["importance"] >= DOMINANT_SHARE):
+        dominant_is_leak = bool(leak and top and top["feature"] in leak["columns"])
+        out.append(finding(
+            "model.suspicious_performance" if suspicious else "model.dominant_feature",
+            "model", "critical" if dominant_is_leak else "warning",
+            (f"Suspiciously high performance (R² {r2:.3f})" if suspicious
+             else f"One feature ('{top['feature']}') drives {top['importance']:.0%} of the model"),
+            {"r2": r2, "top_feature": top},
+            cause=("The dominant feature was flagged for target leakage by the Data Doctor." if dominant_is_leak
+                   else "Either the problem is easy or a feature leaks information about the target."),
+            impact="Production performance may be far lower if this feature isn't available at prediction time.",
+            recommendation="Verify the top feature is known at prediction time; retrain without it if not.",
+            interventions=["drop_leaky_features"] if dominant_is_leak else [],
+            columns=[top["feature"]] if top else []))
     return sort_findings(out)

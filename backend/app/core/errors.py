@@ -39,6 +39,16 @@ class InvalidTargetError(DomainError):
     code = "invalid_target"
 
 
+class UnauthorizedError(DomainError):
+    status_code = 401
+    code = "unauthorized"
+
+
+class ForbiddenError(DomainError):
+    status_code = 403
+    code = "forbidden"
+
+
 class UnsupportedTaskError(DomainError):
     status_code = 422
     code = "unsupported_task"

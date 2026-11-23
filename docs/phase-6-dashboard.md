@@ -110,6 +110,36 @@ frontend/
 - While waiting for the first word it says so ("llama3.1 is thinking
   (local models can take a minute)…"). The Stop button aborts the request.
 
+## Bug found in the browser: the blank Assistant page
+
+The Assistant tab blanked the whole page in Chrome. Server-side tests couldn't
+catch this, because it only happens in a browser. Driving real Chrome with
+Playwright showed the error:
+
+```
+useEffect must not return anything besides a function ... (returned a Promise)
+PAGE ERROR: destroy is not a function   (in <Assistant>)
+```
+
+The cause was `useEffect(() => end.current?.scrollIntoView(...), [messages])`.
+Without braces the arrow function returns `scrollIntoView()`'s result, and
+newer Chrome versions return a Promise from it. React treated the Promise as
+the effect's cleanup function and crashed when it called it, unmounting the
+whole app.
+
+**Fixes:**
+- Braces on the effect.
+- The same defensive change on the theme effect in `Layout.tsx`.
+- **Error boundaries** (`components/ErrorBoundary.tsx`): one around each
+  page, reset when you navigate, and one around the assistant. A crash in
+  one panel now shows "Something went wrong … Try again" instead of a blank
+  screen.
+
+Assistant answers are also rendered with a small, safe Markdown renderer
+(`components/Markdown.tsx`: paragraphs, lists, **bold**, `code`, headings,
+built as React elements with no `innerHTML`). Local models answer in
+Markdown, and before this the raw `**` and `*` characters showed.
+
 ## Connecting to the API
 
 `VITE_API_URL` (default `http://localhost:8000`) is read at build/dev time.
@@ -144,8 +174,15 @@ npm run preview      # serve the production build on :3000
   - a real training job completes
   - a **streamed answer from gemma2:2b** arrives with CORS allowed and a
     cited check id
-- Not yet done: clicking through the pages in a real browser. Layout and
-  chart rendering have only been reviewed in code.
+- **Real-browser check (Playwright + Chrome)** against the live servers:
+  - all 3 pages and all 10 tabs (dataset: Overview, Data Doctor, Models,
+    Diagnosis, Assistant; model: Performance, Explainability, Experiments,
+    Registry, Monitoring) render with **no page errors, no console errors
+    and no failed API calls**
+  - a question asked in the chat was answered by local `gemma2:2b` and
+    rendered as formatted Markdown
+  - unknown routes show the 404 page
+  - screenshots were reviewed for layout
 
 ## Limitations
 

@@ -284,3 +284,18 @@ def test_warmup_when_unavailable(client, settings, monkeypatch):
     assert r["status"] == "unavailable" and "not installed" in r["detail"]
     settings.assistant_mode = "rules"
     assert client.post(f"{API}/assistant/warmup", json={}).json()["status"] == "unavailable"
+
+
+def test_unreachable_ollama_is_explained_and_retried_soon(client, diagnosed, settings, monkeypatch):
+    ds, _, _ = diagnosed
+    settings.assistant_mode = "auto"
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
+    FakeOllama(up=False).install(monkeypatch)
+    out = ask(client, ds["id"], "What should I fix first?")
+    assert out["mode"] == "rules" and "not reachable" in out["note"]  # never a silent fallback
+
+    # Ollama comes back (e.g. it finished loading a model): the failure isn't cached for long.
+    monkeypatch.setattr(engine, "_FAILURE_CACHE_SECONDS", 0)
+    monkeypatch.setattr(engine, "_http", lambda: httpx.Client(transport=httpx.MockTransport(FakeOllama().handler)))
+    assert ask(client, ds["id"], "Why is recall low?")["mode"] == "ollama"

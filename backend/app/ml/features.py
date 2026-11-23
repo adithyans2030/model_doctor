@@ -10,7 +10,7 @@ from dataclasses import asdict, dataclass, field
 import numpy as np
 import pandas as pd
 
-from app.services.target import normalize_labels
+from app.services.target import is_regression_target, normalize_labels, regression_values
 
 EXCLUDED_TYPES = {"id", "text", "empty"}
 
@@ -96,8 +96,15 @@ def original_feature(transformed_name: str, features: list[str]) -> str:
 
 
 def labelled_rows(df: pd.DataFrame, target: str, profile: dict, settings) -> tuple[pd.DataFrame, pd.Series]:
-    """Drop rows without a target and return (frame, normalised string labels)."""
+    """Drop rows without a target and return (frame, target).
+
+    Classification targets come back as normalised string labels, regression
+    targets as floats.
+    """
     mask = df[target].notna()
     frame = df.loc[mask]
+    if is_regression_target(frame[target], profile, settings):
+        values = regression_values(frame[target])
+        return frame, values.loc[frame.index]
     labels = normalize_labels(frame[target], profile, settings)
     return frame, labels.loc[frame.index]

@@ -45,7 +45,8 @@ def main() -> None:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--csv", type=Path, required=True)
     p.add_argument("--target", required=True)
-    p.add_argument("--algorithms", nargs="+", default=["logistic_regression", "random_forest", "xgboost"])
+    p.add_argument("--algorithms", nargs="+", default=None,
+                   help="defaults to the standard algorithms for the target's task")
     p.add_argument("--budget", choices=["quick", "standard"], default="standard")
     p.add_argument("--out", type=Path, default=Path("reports"))
     args = p.parse_args()
@@ -66,10 +67,10 @@ def main() -> None:
             print(f"[2/5] Data Doctor: score {data_report['score']['value']}, {data_report['summary']['severity_counts']}")
 
             training = _job(c, _ok(c.post(f"{API}/datasets/{ds['id']}/train",
-                                          json={"algorithms": args.algorithms}), 202))
+                                          json={"algorithms": args.algorithms} if args.algorithms else {}), 202))
             best_id = training["result"]["best_model_id"]
             print(f"[3/5] Baselines: best {training['result']['leaderboard'][0]['name']} "
-                  f"F1 {training['result']['leaderboard'][0]['f1_macro']}")
+                  f"{training['result']['primary_metric']} {training['result']['leaderboard'][0]['primary']}")
 
             explanations = _ok(c.get(f"{API}/models/{best_id}/explanations"))
             print(f"[4/5] Explanations: {len(explanations['findings'])} prediction findings")
@@ -85,10 +86,13 @@ def main() -> None:
     best_trial = res["best"]["metrics"]
     metrics = {
         "data_quality_score": data_report["score"]["value"],
-        "baseline_f1_macro": training["result"]["leaderboard"][0]["f1_macro"],
-        "leak_free_baseline_f1_macro": res["baseline_f1"],
-        "optimised_f1_macro": best_trial["f1_macro"],
-        "optimised_minority_recall": best_trial["minority_recall"],
+        "task": training["result"]["task"],
+        "primary_metric": training["result"]["primary_metric"],
+        "baseline_primary": training["result"]["leaderboard"][0]["primary"],
+        "leak_free_baseline_primary": res["baseline_primary"],
+        "optimised_primary": best_trial["primary"],
+        **({"optimised_minority_recall": best_trial["minority_recall"]} if "minority_recall" in best_trial
+           else {"optimised_rmse": best_trial["rmse"]}),
         "health_score": diagnosis["health"]["overall"],
         "critical_findings": diagnosis["severity_counts"]["critical"],
         "seconds": round(time.perf_counter() - started, 1),

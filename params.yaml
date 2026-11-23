@@ -5,3 +5,8 @@ demo:
 pipeline:
   target: churned
   budget: standard
+
+houses:
+  rows: 3000
+  seed: 42
+  target: price

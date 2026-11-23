@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import sessionmaker
 
 from app.api.routes import (
-    assistant, datasets, experiments, explain, health, models, monitoring, projects, registry, reports,
+    assistant, auth, datasets, experiments, explain, health, models, monitoring, projects, registry, reports,
 )
 from app.core.config import Settings, get_settings
 from app.core.errors import register_error_handlers
@@ -20,7 +20,7 @@ from app.db.session import make_engine
 from app.services.jobs import recover_interrupted
 
 API_PREFIX = "/api/v1"
-ROUTERS = (health, projects, datasets, reports, models, explain, experiments, registry, monitoring, assistant)
+ROUTERS = (health, auth, projects, datasets, reports, models, explain, experiments, registry, monitoring, assistant)
 
 log = logging.getLogger("modeldoctor")
 

@@ -23,34 +23,44 @@ def compute_health(
         "explanation": "Data Doctor score: 100 minus penalties for data/feature findings.",
     }
 
+    regression = bool(metrics) and metrics.get("task") == "regression"
     if metrics:
         test, cv = metrics["test"], metrics.get("cv")
+        key = metrics.get("primary_metric", "f1_macro")
+        label = "R²" if regression else "Macro-F1"
         comps["performance"] = {
-            "value": _clip(100 * test["f1_macro"]),
-            "explanation": f"Macro-F1 on the held-out test set ({test['f1_macro']:.3f}).",
+            "value": _clip(100 * max(0.0, test[key])),
+            "explanation": f"{label} on the held-out test set ({test[key]:.3f}).",
         }
-        if cv:
-            gap = max(0.0, cv["train"]["f1_macro"]["mean"] - cv["val"]["f1_macro"]["mean"])
-            std = cv["val"]["f1_macro"]["std"]
+        if cv and cv["val"].get(key) and cv["train"].get(key):
+            gap = max(0.0, cv["train"][key]["mean"] - cv["val"][key]["mean"])
+            std = cv["val"][key]["std"]
         else:
-            gap = max(0.0, metrics["train"]["f1_macro"] - test["f1_macro"])
+            gap = max(0.0, (metrics["train"].get(key) or 0) - test[key])
             std = 0.0
-        ece = test["ece"]
+        ece = 0.0 if regression else test["ece"]
         comps["robustness"] = {
             "value": _clip(100 - 150 * gap - 300 * std - 100 * ece),
-            "explanation": (f"100 − 150×overfit gap ({gap:.3f}) − 300×CV std ({std:.3f}) "
-                            f"− 100×calibration error ({ece:.3f})."),
+            "explanation": (f"100 − 150×overfit gap ({gap:.3f}) − 300×CV std ({std:.3f})"
+                            + ("." if regression else f" − 100×calibration error ({ece:.3f}).")),
         }
     else:
         comps["performance"] = {"value": None, "explanation": "No trained model yet."}
         comps["robustness"] = {"value": None, "explanation": "No trained model yet."}
 
-    comps["fairness"] = (
-        {"value": _clip(100 - 150 * fairness_gap),
-         "explanation": f"100 − 150×largest balanced-accuracy gap between groups ({fairness_gap:.3f})."}
-        if fairness_gap is not None else
-        {"value": None, "explanation": "Computed with the model's error analysis (explanations)."}
-    )
+    if fairness_gap is None:
+        comps["fairness"] = {"value": None, "explanation": "Computed with the model's error analysis (explanations)."}
+    elif regression:
+        comps["fairness"] = {
+            "value": _clip(100 - 60 * fairness_gap),
+            "explanation": (f"100 − 60×largest gap in mean absolute error between groups, relative to the "
+                            f"overall error ({fairness_gap:.3f})."),
+        }
+    else:
+        comps["fairness"] = {
+            "value": _clip(100 - 150 * fairness_gap),
+            "explanation": f"100 − 150×largest balanced-accuracy gap between groups ({fairness_gap:.3f}).",
+        }
     comps["drift"] = (
         {"value": drift_score, "explanation": "From the latest drift report for this model."}
         if drift_score is not None else

@@ -107,6 +107,17 @@ docker compose up --build
 # dashboard :3000 · API :8000/docs · MLflow :5000 · Prometheus :9090 · Grafana :3001
 ```
 
+The API and dashboard host ports are configurable, so the stack can run
+next to the local dev servers, which already use 8000 and 3000:
+
+```bash
+API_PORT=8001 WEB_PORT=3002 docker compose up --build -d
+```
+
+The CORS origin and the dashboard's API address follow those variables
+automatically. The API container reaches the Ollama on the host through
+`host.docker.internal`.
+
 ## Postgres
 
 The models use only portable types (String UUID keys, JSON, timezone-aware
@@ -124,9 +135,38 @@ again.
 - Comparison deltas and config diff; cross-dataset comparison rejected.
 - The MLflow integration, using a fake module.
 
-## What was not verified locally
+## Verified with Docker Desktop (full stack)
 
-Docker Desktop wasn't running in this environment, so the images weren't
-built here. `docker compose config` validates the Compose file, and CI
-builds both images. DVC isn't installed locally; the stages call the same
-script that was run directly.
+`docker compose up --build -d` built both images and started all six
+services. The first build took a few minutes, mostly installing the ML
+libraries; XGBoost on Linux also pulls a large NVIDIA library. Checks run
+against the live stack:
+
+| Check | Result |
+|---|---|
+| API health | `{"status":"ok","database":"ok"}` on **Postgres 16** |
+| Migrations | `0001` → `0004` applied automatically on container start (Alembic on Postgres) |
+| Full workflow through the API | Data Doctor (score 34) → 3 baselines → SHAP explanations → experiment (+46 points minority recall) → registry approval → diagnosis (health 74) |
+| MLflow | 11 runs in the `ModelDoctor` experiment: 3 baselines, an optimisation parent run with one nested run per trial, and the candidate model |
+| Prometheus | target `modeldoctor-api` **up** |
+| Grafana | healthy; the provisioned "ModelDoctor" dashboard is present |
+| Dashboard (nginx) | `/` and deep links return 200 |
+| Assistant from inside Docker | reaches the host's Ollama through `host.docker.internal` and sees all 3 local models; a question asked in the browser was answered by `gemma2:2b` |
+| Real-browser test (Playwright + Chrome) | all pages and all 10 tabs, with no page errors, console errors or failed API calls |
+
+**Bug found by this run:** the first browser chat in Docker was silently
+answered by the rules. The panel's warm-up had just started loading
+`llama3.1`, which made Ollama slow to respond; the 2-second reachability
+check timed out, and the "unreachable" result was cached for 30 seconds.
+**Fixes:**
+- a 5-second check
+- "unreachable" results are cached for only 5 seconds
+- a fallback to the rules always includes a note explaining it
+- a test covers this
+
+**Data:** the Docker stack uses its own Postgres database (volume
+`pg-data`), separate from the local SQLite database in `backend/data/` used
+when you run the servers without Docker.
+
+DVC isn't installed locally; its stages call `scripts/run_pipeline.py`,
+which was run directly.

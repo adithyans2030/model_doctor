@@ -119,14 +119,16 @@ def drift_report(features: list[dict], prediction: dict, performance: dict | Non
     if prediction["psi"] >= PSI_MODERATE:
         findings.append(finding(
             "distribution.prediction_drift", "distribution", "critical" if prediction["psi"] >= PSI_MAJOR else "warning",
-            f"The predicted-class mix shifted (PSI {prediction['psi']:.2f})",
+            (f"The distribution of predicted values shifted (PSI {prediction['psi']:.2f})" if prediction.get("kind") == "values"
+             else f"The predicted-class mix shifted (PSI {prediction['psi']:.2f})"),
             prediction, impact="The model behaves differently on this batch than on the test set."))
-    if performance and performance.get("delta_f1_macro") is not None:
-        drop = -performance["delta_f1_macro"]
+    if performance and performance.get("delta_primary") is not None:
+        drop = -performance["delta_primary"]
+        label = "R²" if performance.get("metric") == "r2" else "Macro-F1"
         if drop >= PERF_WARN:
             findings.append(finding(
                 "distribution.concept_drift", "distribution", "critical" if drop >= PERF_CRIT else "warning",
-                f"Macro-F1 dropped from {performance['test_f1_macro']:.2f} (test) to {performance['batch_f1_macro']:.2f} on this batch",
+                f"{label} dropped from {performance['test_primary']:.2f} (test) to {performance['batch_primary']:.2f} on this batch",
                 performance, cause="The relationship between features and target has changed, or the population shifted.",
                 recommendation="Retrain with recent labelled data and re-run the diagnosis.",
                 interventions=["hyperparameter_tuning"]))
@@ -138,8 +140,8 @@ def drift_report(features: list[dict], prediction: dict, performance: dict | Non
 
     psis = np.array([f["psi"] for f in features]) if features else np.array([0.0])
     score = 100 * (1 - np.clip(psis / (2 * PSI_MAJOR), 0, 1).mean())
-    if performance and performance.get("delta_f1_macro") is not None:
-        score -= 200 * max(0.0, -performance["delta_f1_macro"])
+    if performance and performance.get("delta_primary") is not None:
+        score -= 200 * max(0.0, -performance["delta_primary"])
     score = int(round(max(0.0, min(100.0, score))))
     findings = sort_findings(findings)
     return {
@@ -163,3 +165,10 @@ def class_mix_psi(ref_pred: np.ndarray, cur_pred: np.ndarray, classes: list[str]
     return {"psi": round(psi(e, a), 4),
             "reference": {c: round(float(x / e.sum()), 4) for c, x in zip(classes, e)},
             "batch": {c: round(float(x / a.sum()), 4) for c, x in zip(classes, a)}}
+
+
+def prediction_value_psi(ref_pred: np.ndarray, cur_pred: np.ndarray) -> dict:
+    """Regression: PSI of the predicted values (training-quantile bins), plus mean shift."""
+    info = _numeric(pd.Series(ref_pred), pd.Series(cur_pred))
+    return {"kind": "values", "psi": info["psi"], "reference_mean": info["ref_mean"],
+            "batch_mean": info["batch_mean"], "ks_p_value": info.get("p_value")}

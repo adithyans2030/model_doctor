@@ -197,3 +197,40 @@ export function Histogram({ edges, counts }: { edges: number[]; counts: number[]
     </div>
   );
 }
+
+/** Predicted vs actual (regression), with the y = x "perfect prediction" line. */
+export function ScatterChart({ points }: { points: { actual: number; predicted: number }[] }) {
+  const t = useTip();
+  const W = 420, H = 300, P = { l: 56, r: 12, t: 10, b: 36 };
+  const vals = points.flatMap((p) => [p.actual, p.predicted]);
+  const lo = Math.min(...vals), hi = Math.max(...vals);
+  const pad = (hi - lo) * 0.04 || 1;
+  const min = lo - pad, max = hi + pad;
+  const x = (v: number) => P.l + ((v - min) / (max - min)) * (W - P.l - P.r);
+  const y = (v: number) => H - P.b - ((v - min) / (max - min)) * (H - P.t - P.b);
+  const ticks = [0, 0.25, 0.5, 0.75, 1].map((f) => min + f * (max - min));
+  const label = (v: number) => (Math.abs(v) >= 1e6 ? `${(v / 1e6).toFixed(1)}M` : Math.abs(v) >= 1e3 ? `${(v / 1e3).toFixed(0)}k` : v.toPrecision(3));
+  return (
+    <div className="relative" ref={t.ref} onMouseLeave={t.hide}>
+      <Legend items={[["test rows", "var(--series-1)"], ["perfect prediction (y = x)", "var(--text-muted)"]]} />
+      <svg viewBox={`0 0 ${W} ${H}`} width="100%" role="img" aria-label="Predicted versus actual values">
+        {ticks.map((v) => (
+          <g key={v}>
+            <line x1={P.l} x2={W - P.r} y1={y(v)} y2={y(v)} stroke="var(--grid)" />
+            <text x={P.l - 6} y={y(v) + 4} textAnchor="end" fontSize="10" fill="var(--text-muted)">{label(v)}</text>
+            <text x={x(v)} y={H - P.b + 14} textAnchor="middle" fontSize="10" fill="var(--text-muted)">{label(v)}</text>
+          </g>
+        ))}
+        <line x1={x(min)} y1={y(min)} x2={x(max)} y2={y(max)} stroke="var(--text-muted)" strokeDasharray="4 3" />
+        {points.map((p, i) => (
+          <circle key={i} cx={x(p.actual)} cy={y(p.predicted)} r="4" fill="var(--series-1)" fillOpacity="0.55"
+            stroke="var(--surface-1)" strokeWidth="1"
+            onMouseMove={(e) => t.show(e, <>actual <b>{p.actual.toLocaleString()}</b><br />predicted <b>{Math.round(p.predicted).toLocaleString()}</b><br />error {Math.round(p.predicted - p.actual).toLocaleString()}</>)} />
+        ))}
+        <text x={(P.l + W - P.r) / 2} y={H - 4} textAnchor="middle" fontSize="10" fill="var(--text-muted)">actual</text>
+        <text x={12} y={(P.t + H - P.b) / 2} textAnchor="middle" fontSize="10" fill="var(--text-muted)" transform={`rotate(-90 12 ${(P.t + H - P.b) / 2})`}>predicted</text>
+      </svg>
+      {t.node}
+    </div>
+  );
+}

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Assistant } from "@/components/Assistant";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { Bars, Histogram } from "@/components/charts";
 import {
   Crumbs, Empty, ErrorBox, FindingsList, HealthPanel, Loading, Section, SeverityBadge, Spinner, StageBadge, Stat, Tabs, cx,
@@ -38,7 +39,7 @@ export default function DatasetPage() {
       {tab === "data" && <DataDoctor id={id} key={d.target_column || "none"} />}
       {tab === "models" && !needsTarget && <Models d={d} />}
       {tab === "diagnosis" && !needsTarget && <DiagnosisView id={id} />}
-      {tab === "assistant" && !needsTarget && <Assistant datasetId={id} />}
+      {tab === "assistant" && !needsTarget && <ErrorBoundary label="the assistant"><Assistant datasetId={id} /></ErrorBoundary>}
     </div>
   );
 }
@@ -83,6 +84,7 @@ function Overview({ d, onChanged }: { d: Dataset; onChanged: () => void }) {
           </div>
           <ErrorBox error={error} />
           {warnings.map((w) => <div key={w} className="notice mt-2 text-[13px]"><SeverityBadge severity="warning" /> {w}</div>)}
+          {d.target_summary && <TargetSummaryView s={d.target_summary} />}
           {d.class_distribution && (
             <div className="mt-3">
               <div className="mb-1 text-[13px] text-fg-2">Class distribution</div>
@@ -133,6 +135,21 @@ function Overview({ d, onChanged }: { d: Dataset; onChanged: () => void }) {
   );
 }
 
+function TargetSummaryView({ s }: { s: NonNullable<Dataset["target_summary"]> }) {
+  return (
+    <div className="mt-3">
+      <div className="mb-1 text-[13px] text-fg-2">Target distribution (regression)</div>
+      <Histogram edges={s.histogram.edges} counts={s.histogram.counts} />
+      <table className="tbl mt-2"><tbody>
+        <tr><td className="text-fg-3">Mean / median</td><td className="num">{fmt.sig(s.mean)} / {fmt.sig(s.median)}</td>
+          <td className="text-fg-3">Min / max</td><td className="num">{fmt.sig(s.min)} / {fmt.sig(s.max)}</td></tr>
+        <tr><td className="text-fg-3">Std</td><td className="num">{fmt.sig(s.std)}</td>
+          <td className="text-fg-3">Skewness</td><td className="num">{s.skew.toFixed(2)}{Math.abs(s.skew) >= 1 ? " (skewed)" : ""}</td></tr>
+      </tbody></table>
+    </div>
+  );
+}
+
 function DataDoctor({ id }: { id: string }) {
   const [refresh, setRefresh] = useState(0);
   const report = useResource<DataReport>(`/datasets/${id}/data-report${refresh ? `?refresh=true&n=${refresh}` : ""}`);
@@ -175,23 +192,25 @@ function DataDoctor({ id }: { id: string }) {
   );
 }
 
-const ALGOS: [string, string][] = [
-  ["logistic_regression", "Logistic Regression"], ["random_forest", "Random Forest"], ["xgboost", "XGBoost"], ["svm", "SVM (RBF)"],
-];
+type AlgoInfo = { key: string; label: string; available: boolean; default: boolean; note: string };
 
 function Models({ d }: { d: Dataset }) {
+  const regression = d.task_type === "regression";
+  const task = regression ? "regression" : "classification";
   const models = useResource<ModelSummary[]>(`/datasets/${d.id}/models`);
-  const [algos, setAlgos] = useState<string[]>(ALGOS.map((a) => a[0]));
+  const catalogue = useResource<AlgoInfo[]>(`/algorithms?task=${task}`);
+  const [algos, setAlgos] = useState<string[] | null>(null);
   const [drop, setDrop] = useState<string[]>([]);
   const [folds, setFolds] = useState(5);
   const [jobId, setJobId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const job = useJob(jobId, () => models.reload());
+  const chosen = algos ?? (catalogue.data || []).filter((a) => a.default).map((a) => a.key);
 
   async function train() {
     setError(null);
     try {
-      const j = await api<Job>(`/datasets/${d.id}/train`, { json: { algorithms: algos, drop_columns: drop, cv_folds: folds } });
+      const j = await api<Job>(`/datasets/${d.id}/train`, { json: { algorithms: chosen, drop_columns: drop, cv_folds: folds } });
       setJobId(j.id);
     } catch (e) {
       setError((e as Error).message);
@@ -200,16 +219,18 @@ function Models({ d }: { d: Dataset }) {
   const running = !!job && (job.status === "queued" || job.status === "running");
   const featureCols = (d.columns || []).filter((c) => c.name !== d.target_column).map((c) => c.name);
   const skipped: { algorithm: string; reason: string }[] = job?.result?.skipped || [];
+  const toggle = (k: string, on: boolean) => setAlgos(on ? [...chosen, k] : chosen.filter((x) => x !== k));
 
   return (
     <div className="space-y-4">
       <Section title="Train baseline models">
         <div className="space-y-3">
           <div className="flex flex-wrap gap-4">
-            {ALGOS.map(([k, label]) => (
-              <label key={k} className="inline-flex items-center gap-1.5">
-                <input type="checkbox" checked={algos.includes(k)} className="accent-accent"
-                  onChange={(e) => setAlgos((a) => (e.target.checked ? [...a, k] : a.filter((x) => x !== k)))} />{label}
+            {(catalogue.data || []).map((a) => (
+              <label key={a.key} className={cx("inline-flex items-center gap-1.5", !a.available && "opacity-50")} title={a.note}>
+                <input type="checkbox" checked={chosen.includes(a.key)} disabled={!a.available} className="accent-accent"
+                  onChange={(e) => toggle(a.key, e.target.checked)} />
+                {a.label}{a.note && <span className="text-xs text-fg-3">({a.note})</span>}
               </label>
             ))}
           </div>
@@ -232,7 +253,7 @@ function Models({ d }: { d: Dataset }) {
             </details>
           </div>
           <div className="flex flex-wrap items-center gap-3">
-            <button className="btn btn-primary" disabled={!algos.length || running} onClick={train}>{running ? "Training…" : "Train"}</button>
+            <button className="btn btn-primary" disabled={!chosen.length || running} onClick={train}>{running ? "Training…" : "Train"}</button>
             {job && <span className="text-[13px] text-fg-2">{running && <Spinner />} {job.status}: {job.progress || ""}</span>}
           </div>
           {job?.status === "failed" && <ErrorBox error={job.error} />}
@@ -240,21 +261,39 @@ function Models({ d }: { d: Dataset }) {
           <ErrorBox error={error} />
         </div>
       </Section>
-      <Section title="Leaderboard (held-out test set, ranked by macro-F1)">
+      <UploadModel d={d} onUploaded={models.reload} />
+      <Section title={`Leaderboard (held-out test set, ranked by ${regression ? "R²" : "macro-F1"})`}>
         {!models.data ? <Loading /> : models.data.length === 0 ? <Empty>No models trained yet.</Empty> : (
           <div className="overflow-x-auto">
             <table className="tbl">
-              <thead><tr><th>Model</th><th>Stage</th><th className="num">Accuracy</th><th className="num">Balanced acc.</th><th className="num">Macro-F1</th><th className="num">ROC AUC</th><th className="num">Weakest class recall</th><th className="num">Findings</th></tr></thead>
+              <thead>
+                {regression ? (
+                  <tr><th>Model</th><th>Stage</th><th className="num">R²</th><th className="num">RMSE</th><th className="num">MAE</th><th className="num">MAPE</th><th className="num">Findings</th></tr>
+                ) : (
+                  <tr><th>Model</th><th>Stage</th><th className="num">Accuracy</th><th className="num">Balanced acc.</th><th className="num">Macro-F1</th><th className="num">ROC AUC</th><th className="num">Weakest class recall</th><th className="num">Findings</th></tr>
+                )}
+              </thead>
               <tbody>
-                {[...models.data].sort((a, b) => b.scores.f1_macro - a.scores.f1_macro).map((m) => (
+                {[...models.data].sort((a, b) => b.scores.primary - a.scores.primary).map((m) => (
                   <tr key={m.id}>
                     <td><Link to={`/models/${m.id}`}>{m.name}</Link> <span className="text-xs text-fg-3">{m.source}</span></td>
                     <td><StageBadge stage={m.stage} /></td>
-                    <td className="num">{fmt.pct(m.scores.accuracy, 1)}</td>
-                    <td className="num">{fmt.pct(m.scores.balanced_accuracy, 1)}</td>
-                    <td className="num"><b>{fmt.num(m.scores.f1_macro)}</b></td>
-                    <td className="num">{fmt.num(m.scores.roc_auc)}</td>
-                    <td className="num">{m.scores.worst_class?.label}: {fmt.pct(m.scores.worst_class?.recall)}</td>
+                    {regression ? (
+                      <>
+                        <td className="num"><b>{fmt.num(m.scores.r2)}</b></td>
+                        <td className="num">{fmt.sig(m.scores.rmse)}</td>
+                        <td className="num">{fmt.sig(m.scores.mae)}</td>
+                        <td className="num">{fmt.pct(m.scores.mape, 1)}</td>
+                      </>
+                    ) : (
+                      <>
+                        <td className="num">{fmt.pct(m.scores.accuracy, 1)}</td>
+                        <td className="num">{fmt.pct(m.scores.balanced_accuracy, 1)}</td>
+                        <td className="num"><b>{fmt.num(m.scores.f1_macro)}</b></td>
+                        <td className="num">{fmt.num(m.scores.roc_auc)}</td>
+                        <td className="num">{m.scores.worst_class?.label}: {fmt.pct(m.scores.worst_class?.recall)}</td>
+                      </>
+                    )}
                     <td className="num">{m.n_findings}</td>
                   </tr>
                 ))}
@@ -264,6 +303,51 @@ function Models({ d }: { d: Dataset }) {
         )}
       </Section>
     </div>
+  );
+}
+
+function UploadModel({ d, onUploaded }: { d: Dataset; onUploaded: () => void }) {
+  const navigate = useNavigate();
+  const [file, setFile] = useState<File | null>(null);
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function upload() {
+    if (!file) return;
+    setBusy(true);
+    setError(null);
+    const form = new FormData();
+    form.append("file", file);
+    if (name.trim()) form.append("name", name.trim());
+    try {
+      const m = await api<ModelSummary>(`/datasets/${d.id}/models/upload`, { form });
+      onUploaded();
+      navigate(`/models/${m.id}`);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Section title="Bring your own model">
+      <p className="mb-3 text-[13px] text-fg-2">
+        Upload a model you trained yourself, saved with <code className="font-mono">skops.io.dump</code>. It must accept a
+        DataFrame with this dataset&apos;s feature columns. Every type in the file is checked against an allowlist
+        (scikit-learn, XGBoost, LightGBM, imbalanced-learn, NumPy, SciPy) <b>before</b> it is loaded; pickle/joblib files
+        are refused because they can run code.
+      </p>
+      <div className="flex flex-wrap items-center gap-3">
+        <input type="file" accept=".skops"
+          className="text-[13px] file:mr-3 file:cursor-pointer file:rounded-lg file:border file:border-line file:bg-surface-2 file:px-3 file:py-1.5 file:text-fg"
+          onChange={(e) => setFile(e.target.files?.[0] || null)} />
+        <input className="field" placeholder="Name (optional)" maxLength={120} value={name} onChange={(e) => setName(e.target.value)} />
+        <button className="btn btn-primary" disabled={!file || busy} onClick={upload}>{busy ? "Evaluating…" : "Upload & diagnose"}</button>
+      </div>
+      <ErrorBox error={error} />
+    </Section>
   );
 }
 

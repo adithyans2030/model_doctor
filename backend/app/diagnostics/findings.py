@@ -30,6 +30,7 @@ INTERVENTIONS = {
     "feature_selection": "Feature selection",
     "hyperparameter_tuning": "Hyperparameter search",
     "calibration": "Probability calibration",
+    "target_transform": "Log-transform the target",
 }
 
 

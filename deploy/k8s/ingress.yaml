@@ -1,0 +1,26 @@
+# One host serves both the dashboard and the API, so no CORS is involved in production.
+# Assumes an NGINX ingress controller and cert-manager (for TLS); adjust host/class to your cluster.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: modeldoctor
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"      # = MD_MAX_UPLOAD_MB
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "600"   # streamed assistant answers
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    cert-manager.io/cluster-issuer: letsencrypt
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts: [modeldoctor.example.com]
+      secretName: modeldoctor-tls
+  rules:
+    - host: modeldoctor.example.com
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend: { service: { name: api, port: { name: http } } }
+          - path: /
+            pathType: Prefix
+            backend: { service: { name: web, port: { name: http } } }

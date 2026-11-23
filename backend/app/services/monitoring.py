@@ -1,5 +1,6 @@
 """Phase 8 use cases: drift reports for production batches."""
 
+import numpy as np
 import pandas as pd
 from fastapi import UploadFile
 from sqlalchemy import select
@@ -8,9 +9,9 @@ from sqlalchemy.orm import Session
 from app.core.config import Settings
 from app.core.errors import DomainError
 from app.db.models import MLModel, Report
-from app.ml.evaluation import classification_metrics, predict_labels
+from app.ml.evaluation import classification_metrics, predict_labels, regression_quick
 from app.ml.features import FeatureSpec, prepare_frame
-from app.monitoring.drift import class_mix_psi, drift_report, feature_drift
+from app.monitoring.drift import class_mix_psi, drift_report, feature_drift, prediction_value_psi
 from app.services import ingestion
 from app.services.explanations import holdout
 from app.services.target import normalize_labels
@@ -49,30 +50,49 @@ def monitor_batch(db: Session, settings: Settings, model: MLModel, upload: Uploa
 
     pipe, pos, classes = bundle["pipeline"], bundle["positive_index"], bundle["classes"]
     threshold = bundle["config"].get("threshold")
-    test_pred = predict_labels(pipe.predict_proba(data.X_test[spec.features]), pos, threshold)
-    proba = pipe.predict_proba(cur)
-    batch_pred = predict_labels(proba, pos, threshold)
-    prediction = class_mix_psi(test_pred, batch_pred, classes)
+    regression = model.task == "regression"
+    if regression:
+        test_values = np.asarray(pipe.predict(data.X_test[spec.features]), dtype=float)
+        batch_values = np.asarray(pipe.predict(cur), dtype=float)
+        prediction = prediction_value_psi(test_values, batch_values)
+    else:
+        test_pred = predict_labels(pipe.predict_proba(data.X_test[spec.features]), pos, threshold)
+        proba = pipe.predict_proba(cur)
+        batch_pred = predict_labels(proba, pos, threshold)
+        prediction = class_mix_psi(test_pred, batch_pred, classes)
 
     performance = None
     if schema["has_labels"] and batch[target].notna().sum() >= 10:
         profile = next(c for c in dataset.columns if c["name"] == target)
         labelled = batch[target].notna()
-        labels = normalize_labels(batch.loc[labelled, target], profile, settings)
-        known = labels.isin(classes)
-        code = {c: i for i, c in enumerate(classes)}
-        y = labels[known].map(code).to_numpy()
-        if len(y) >= 10:
-            mask = labelled.to_numpy().nonzero()[0][known.to_numpy()]
-            m = classification_metrics(y, proba[mask], classes, pos, threshold)
-            test_f1 = model.metrics["test"]["f1_macro"]
-            performance = {
-                "n_labelled": int(len(y)), "unknown_labels": int((~known).sum()),
-                "test_f1_macro": test_f1, "batch_f1_macro": m["f1_macro"],
-                "delta_f1_macro": round(m["f1_macro"] - test_f1, 4),
-                "batch_accuracy": m["accuracy"], "batch_balanced_accuracy": m["balanced_accuracy"],
-                "batch_minority_recall": (m.get("positive_class") or m["worst_class"])["recall"],
-            }
+        primary = model.metrics.get("primary_metric", "f1_macro")
+        test_value = model.primary_score
+        if regression:
+            y = pd.to_numeric(batch.loc[labelled, target], errors="coerce")
+            ok = y.notna().to_numpy()
+            if ok.sum() >= 10:
+                m = regression_quick(y.to_numpy()[ok], batch_values[labelled.to_numpy()][ok])
+                performance = {
+                    "metric": primary, "n_labelled": int(ok.sum()), "unknown_labels": int((~ok).sum()),
+                    "test_primary": test_value, "batch_primary": m["r2"],
+                    "delta_primary": round(m["r2"] - test_value, 4),
+                    "batch_rmse": m["rmse"], "batch_mae": m["mae"], "test_rmse": model.metrics["test"]["rmse"],
+                }
+        else:
+            labels = normalize_labels(batch.loc[labelled, target], profile, settings)
+            known = labels.isin(classes)
+            code = {c: i for i, c in enumerate(classes)}
+            y = labels[known].map(code).to_numpy()
+            if len(y) >= 10:
+                mask = labelled.to_numpy().nonzero()[0][known.to_numpy()]
+                m = classification_metrics(y, proba[mask], classes, pos, threshold)
+                performance = {
+                    "metric": primary, "n_labelled": int(len(y)), "unknown_labels": int((~known).sum()),
+                    "test_primary": test_value, "batch_primary": m["f1_macro"],
+                    "delta_primary": round(m["f1_macro"] - test_value, 4),
+                    "batch_accuracy": m["accuracy"], "batch_balanced_accuracy": m["balanced_accuracy"],
+                    "batch_minority_recall": (m.get("positive_class") or m["worst_class"])["recall"],
+                }
 
     payload = drift_report(features, prediction, performance, schema)
     payload.update(batch={"filename": filename, "n_rows": int(len(batch))}, model_id=model.id)

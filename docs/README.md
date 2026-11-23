@@ -14,6 +14,7 @@ Read in order; each phase builds on the previous ones.
 | 7 | [phase-7-mlops.md](phase-7-mlops.md) | Registry with human approval, MLflow, DVC, Docker, Postgres |
 | 8 | [phase-8-production.md](phase-8-production.md) | Drift monitoring, Prometheus/Grafana, auth, rate limiting, audit log, CI/CD |
 | 9 | [phase-9-assistant.md](phase-9-assistant.md) | Grounded AI assistant on your local Ollama models (streamed), with optional Claude and a rule-based fallback |
+| 10 | [phase-10-extended-features.md](phase-10-extended-features.md) | Regression, LightGBM + PyTorch, LIME, safe model upload, user accounts, frontend tests, DVC run, Kubernetes |
 
 Each document lists what was built (with file paths), how it works, the
 thresholds used, the API, results on the demo dataset, the tests that cover

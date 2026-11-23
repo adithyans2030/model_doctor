@@ -12,10 +12,10 @@ import warnings
 import numpy as np
 import pandas as pd
 from scipy.stats import chi2_contingency
-from sklearn.feature_selection import mutual_info_classif
-from sklearn.metrics import balanced_accuracy_score, roc_auc_score
-from sklearn.model_selection import StratifiedKFold, cross_val_predict
-from sklearn.tree import DecisionTreeClassifier
+from sklearn.feature_selection import mutual_info_classif, mutual_info_regression
+from sklearn.metrics import balanced_accuracy_score, r2_score, roc_auc_score
+from sklearn.model_selection import KFold, StratifiedKFold, cross_val_predict
+from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
 
 from app.diagnostics.findings import finding, score_from_findings, sort_findings, summarize_counts
 from app.ml.features import build_feature_spec, labelled_rows, prepare_frame
@@ -234,7 +234,28 @@ def _check_duplicates(df, target, columns, findings):
     return n_dup
 
 
+SKEW_WARN = 1.0
+
+
+def _check_regression_target(dataset, findings) -> None:
+    s = dataset.target_summary or {}
+    skew = s.get("skew")
+    if skew is not None and abs(skew) >= SKEW_WARN:
+        can_log = bool(s.get("all_non_negative"))
+        findings.append(finding(
+            "data.skewed_target", "data", "warning",
+            f"The target '{dataset.target_column}' is strongly skewed (skewness {skew:.2f})",
+            {"skew": skew, "median": s.get("median"), "mean": s.get("mean"), "max": s.get("max")},
+            impact="A few very large values dominate squared-error training; errors grow with the predicted value.",
+            recommendation=("Model log(1 + target); predictions are transformed back automatically." if can_log
+                            else "Consider a transformation suited to negative values."),
+            interventions=["target_transform"] if can_log else [], columns=[dataset.target_column]))
+
+
 def _check_target(dataset, findings) -> float | None:
+    if dataset.task_type == "regression":
+        _check_regression_target(dataset, findings)
+        return None
     dist = dataset.class_distribution or []
     if len(dist) < 2:
         return None
@@ -258,31 +279,41 @@ def _feature_target_checks(df, dataset, spec, settings, findings) -> list[dict]:
     """Leakage probes and relevance (mutual information) per feature."""
     profile = next(c for c in dataset.columns if c["name"] == dataset.target_column)
     frame, y = labelled_rows(df, dataset.target_column, profile, settings)
+    regression = pd.api.types.is_float_dtype(y)
     X = prepare_frame(frame, spec)
-    sample_idx = _sample(pd.DataFrame(index=X.index), PROBE_SAMPLE, stratify=y).index
+    sample_idx = _sample(pd.DataFrame(index=X.index), PROBE_SAMPLE, stratify=None if regression else y).index
     X, y = X.loc[sample_idx], y.loc[sample_idx]
-    classes = sorted(y.unique())
-    y_codes = y.map({c: i for i, c in enumerate(classes)}).to_numpy()
-    binary = len(classes) == 2
-    min_count = int(pd.Series(y_codes).value_counts().min())
-    folds = min(3, min_count)
+    if regression:
+        y_codes = y.to_numpy(dtype=float)
+        binary, folds, metric = False, min(3, len(y_codes) // 10), "r2"
+    else:
+        classes = sorted(y.unique())
+        y_codes = y.map({c: i for i, c in enumerate(classes)}).to_numpy()
+        binary = len(classes) == 2
+        folds = min(3, int(pd.Series(y_codes).value_counts().min()))
+        metric = "roc_auc" if binary else "balanced_accuracy"
 
     results = []
     numeric_set = set(spec.numeric_like)
     encoded = {c: _encode_for_probe(X[c], c in numeric_set) for c in spec.features}
 
     for c in spec.features:
-        entry = {"column": c, "score": None, "metric": "roc_auc" if binary else "balanced_accuracy"}
+        entry = {"column": c, "score": None, "metric": metric}
         if folds >= 2:
-            probe = DecisionTreeClassifier(max_depth=4, min_samples_leaf=5, random_state=0)
-            cv = StratifiedKFold(folds, shuffle=True, random_state=0)
-            if binary:
-                proba = cross_val_predict(probe, encoded[c], y_codes, cv=cv, method="predict_proba")[:, 1]
-                score = roc_auc_score(y_codes, proba)
-                score = max(score, 1 - score)
+            if regression:
+                probe = DecisionTreeRegressor(max_depth=6, min_samples_leaf=5, random_state=0)
+                pred = cross_val_predict(probe, encoded[c], y_codes, cv=KFold(folds, shuffle=True, random_state=0))
+                score = max(0.0, r2_score(y_codes, pred))
             else:
-                pred = cross_val_predict(probe, encoded[c], y_codes, cv=cv)
-                score = balanced_accuracy_score(y_codes, pred)
+                probe = DecisionTreeClassifier(max_depth=4, min_samples_leaf=5, random_state=0)
+                cv = StratifiedKFold(folds, shuffle=True, random_state=0)
+                if binary:
+                    proba = cross_val_predict(probe, encoded[c], y_codes, cv=cv, method="predict_proba")[:, 1]
+                    score = roc_auc_score(y_codes, proba)
+                    score = max(score, 1 - score)
+                else:
+                    pred = cross_val_predict(probe, encoded[c], y_codes, cv=cv)
+                    score = balanced_accuracy_score(y_codes, pred)
             entry["score"] = round(float(score), 4)
         results.append(entry)
 
@@ -291,7 +322,8 @@ def _feature_target_checks(df, dataset, spec, settings, findings) -> list[dict]:
     discrete = [c not in numeric_set for c in spec.features]
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        mi = mutual_info_classif(mat, y_codes, discrete_features=discrete, random_state=0)
+        mi_fn = mutual_info_regression if regression else mutual_info_classif
+        mi = mi_fn(mat, y_codes, discrete_features=discrete, random_state=0)
     for entry, value in zip(results, mi):
         entry["mutual_info"] = round(float(value), 5)
 
@@ -308,7 +340,8 @@ def _feature_target_checks(df, dataset, spec, settings, findings) -> list[dict]:
             recommendation="Confirm when this value becomes known. If it is only known after the outcome, remove it.",
             interventions=["drop_leaky_features"], columns=[r["column"]]))
 
-    low = [r for r in results if r["mutual_info"] < LOW_RELEVANCE_MI and (r["score"] is None or r["score"] < 0.55)]
+    weak = 0.02 if regression else 0.55  # probe score that means "no signal" (R² vs AUC/balanced accuracy)
+    low = [r for r in results if r["mutual_info"] < LOW_RELEVANCE_MI and (r["score"] is None or r["score"] < weak)]
     if low:
         findings.append(finding(
             "feature.low_relevance", "feature", "info",
@@ -394,6 +427,7 @@ def run_data_doctor(df: pd.DataFrame, dataset, settings) -> dict:
         "target": target,
         "task_type": dataset.task_type,
         "class_distribution": dataset.class_distribution,
+        "target_summary": dataset.target_summary,
         "imbalance_ratio": imbalance,
         "severity_counts": summarize_counts(findings),
     }

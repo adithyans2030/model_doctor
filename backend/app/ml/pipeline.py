@@ -11,7 +11,7 @@ import numpy as np
 from imblearn.over_sampling import SMOTE
 from imblearn.pipeline import Pipeline as ImbPipeline
 from sklearn.calibration import CalibratedClassifierCV
-from sklearn.compose import ColumnTransformer
+from sklearn.compose import ColumnTransformer, TransformedTargetRegressor
 from sklearn.impute import SimpleImputer
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
@@ -31,6 +31,7 @@ class TrainConfig:
     dedupe: bool = False  # drop duplicate rows from the training split
     threshold: float | None = None  # binary decision threshold (None = argmax / 0.5)
     calibration: str | None = None  # "sigmoid" | "isotonic"
+    target_transform: str | None = None  # regression: "log1p" trains on log(1 + y)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -40,7 +41,7 @@ class TrainConfig:
         return cls(**{k: v for k, v in d.items() if k in cls.__dataclass_fields__})
 
     def describe(self) -> str:
-        parts = [ALGORITHMS[self.algorithm].label]
+        parts = [ALGORITHMS[self.algorithm].label if self.algorithm in ALGORITHMS else "Uploaded model"]
         if self.class_weight:
             parts.append("class weights")
         if self.resampling:
@@ -56,6 +57,8 @@ class TrainConfig:
             parts.append(f"{self.calibration} calibration")
         if self.threshold is not None:
             parts.append(f"threshold {self.threshold:.2f}")
+        if self.target_transform:
+            parts.append(f"{self.target_transform} target")
         return " + ".join(parts)
 
 
@@ -96,8 +99,14 @@ def make_preprocessor(spec: FeatureSpec) -> ColumnTransformer:
     return ColumnTransformer(transformers, remainder="drop")
 
 
-def build_pipeline(cfg: TrainConfig, spec: FeatureSpec, y_train: np.ndarray, n_jobs: int = -1):
-    estimator = make_estimator(cfg.algorithm, cfg.params, cfg.class_weight, n_jobs)
+def build_pipeline(cfg: TrainConfig, spec: FeatureSpec, y_train: np.ndarray, n_jobs: int = -1,
+                   task: str = "classification"):
+    estimator = make_estimator(cfg.algorithm, cfg.params, cfg.class_weight, n_jobs, task)
+    if task == "regression":
+        if cfg.target_transform == "log1p":
+            # Only the model sees log(1 + y); predictions are mapped back with expm1.
+            estimator = TransformedTargetRegressor(regressor=estimator, func=np.log1p, inverse_func=np.expm1)
+        return Pipeline([("prep", make_preprocessor(spec)), ("model", estimator)])
     if cfg.calibration:
         estimator = CalibratedClassifierCV(estimator, method=cfg.calibration, cv=3)
     steps = [("prep", make_preprocessor(spec))]
@@ -109,15 +118,26 @@ def build_pipeline(cfg: TrainConfig, spec: FeatureSpec, y_train: np.ndarray, n_j
     return Pipeline(steps + [("model", estimator)])
 
 
-def fit_params(cfg: TrainConfig, y_train: np.ndarray) -> dict:
+def fit_params(cfg: TrainConfig, y_train: np.ndarray, task: str = "classification") -> dict:
     """Algorithms without a class_weight option get balanced sample weights instead."""
-    if cfg.class_weight and not ALGORITHMS[cfg.algorithm].supports_class_weight:
+    if task == "classification" and cfg.class_weight and not ALGORITHMS[cfg.algorithm].supports_class_weight:
         return {"model__sample_weight": compute_sample_weight(cfg.class_weight, y_train)}
     return {}
 
 
 def underlying_model(pipe):
     model = pipe.named_steps["model"]
+    while isinstance(model, TransformedTargetRegressor):  # log target and/or scaled target (SVR)
+        model = model.regressor_
     if isinstance(model, CalibratedClassifierCV):
         return model.calibrated_classifiers_[0].estimator
     return model
+
+
+def search_prefix(cfg: TrainConfig) -> str:
+    """Where the estimator's hyperparameters live inside the pipeline."""
+    if cfg.target_transform:
+        return "model__regressor__"
+    if cfg.calibration:
+        return "model__estimator__"
+    return "model__"

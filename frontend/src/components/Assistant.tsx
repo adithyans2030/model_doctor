@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api, streamNdjson } from "@/lib/api";
+import { Markdown } from "./Markdown";
 import { cx, Spinner } from "./ui";
 
 type Msg = { role: "user" | "assistant"; content: string; meta?: string; pending?: boolean };
@@ -39,7 +40,11 @@ export function Assistant({ datasetId, modelId }: { datasetId: string; modelId?:
     api<Providers>("/assistant/providers").then(setProviders).catch(() => setProviders(null));
     return () => abort.current?.abort();
   }, []);
-  useEffect(() => end.current?.scrollIntoView({ block: "nearest" }), [messages]);
+  // Braces matter: newer browsers return a Promise from scrollIntoView(), and an effect
+  // must return nothing or a cleanup function.
+  useEffect(() => {
+    end.current?.scrollIntoView({ block: "nearest" });
+  }, [messages]);
 
   const model = localModel || providers?.default_model || "";
 
@@ -132,9 +137,9 @@ export function Assistant({ datasetId, modelId }: { datasetId: string; modelId?:
           </div>
         )}
         {messages.map((m, i) => (
-          <div key={i} className={cx("max-w-[88%] whitespace-pre-wrap rounded-xl px-3 py-2.5",
+          <div key={i} data-role={m.role} className={cx("max-w-[88%] rounded-xl px-3 py-2.5",
             m.role === "user" ? "self-end bg-accent text-accent-ink" : "self-start bg-surface-2")}>
-            {m.content || (m.pending && (
+            {m.content ? (m.role === "assistant" ? <Markdown text={m.content} /> : <span className="whitespace-pre-wrap">{m.content}</span>) : (m.pending && (
               <span className="text-fg-3">
                 <Spinner /> {providers?.provider === "ollama"
                   ? `${model} is ${warm === "ready" ? "thinking" : "loading and thinking"}… ${elapsed}s`

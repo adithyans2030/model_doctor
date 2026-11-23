@@ -50,11 +50,20 @@ def test_boolean_strings_normalised(client, project):
     assert labels == {"yes", "no"}
 
 
-def test_continuous_target_is_unsupported(client, project):
-    r = _set_target(client, project, make_df(), "income")
-    assert r.status_code == 422
-    assert r.json()["error"]["code"] == "unsupported_task"
-    assert "regression" in r.json()["error"]["message"]
+def test_continuous_target_is_regression(client, project):
+    df = make_df()
+    df["spend"] = np.random.default_rng(3).lognormal(3, 1, len(df))  # skewed, non-negative
+    r = _set_target(client, project, df, "spend")
+    assert r.status_code == 200, r.text
+    ds = r.json()["dataset"]
+    assert ds["task_type"] == "regression" and ds["class_distribution"] is None and ds["n_classes"] is None
+    s = ds["target_summary"]
+    assert s["n"] == 120 and s["min"] < s["median"] < s["max"] and s["all_non_negative"] is True
+    assert len(s["histogram"]["counts"]) == 20
+    assert any("skewed" in w for w in r.json()["warnings"])
+
+    r = _set_target(client, project, make_df(), "income")  # continuous, roughly symmetric
+    assert r.json()["dataset"]["task_type"] == "regression" and r.json()["warnings"] == []
 
 
 @pytest.mark.parametrize("column", ["customer_id", "note", "signup"])

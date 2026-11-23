@@ -43,7 +43,7 @@ cd backend
 pip install -r requirements-dev.txt
 alembic upgrade head
 uvicorn app.main:create_app --factory --reload       # http://localhost:8000/docs
-pytest                                                # 107 tests
+pytest                                                # 128 tests
 
 # Dashboard (second terminal)
 cd frontend
@@ -87,7 +87,11 @@ it uses rule-based answers built from the same results. A Claude API key is opti
 | Monitoring | PSI / KS / chi-square drift, Prometheus metrics, Grafana |
 | Security | API keys, rate limiting, audit log, upload sniffing, non-root containers |
 | AI | Local LLMs via Ollama (llama3.1, gemma2), streamed; optional Claude; grounded on structured results with verified citations |
-| Frontend | React 19, Vite 8, Tailwind CSS 4, React Router 7, TypeScript, hand-built SVG charts |
+| Tasks | Binary / multiclass classification **and regression** (R², RMSE, residual analysis, log-target fix) |
+| Models | Logistic/Ridge, Random Forest, XGBoost, LightGBM, SVM, PyTorch MLP (optional), plus **your own models** (safe skops upload) |
+| Accounts | Sign-in with Argon2 + JWT, viewer / member / admin roles |
+| Frontend | React 19, Vite 8, Tailwind CSS 4, React Router 7, TypeScript, hand-built SVG charts; Vitest + Playwright tests |
+| Deploy | Docker Compose, Kubernetes manifests (Kustomize), images published to GHCR on release |
 | CI | GitHub Actions: pytest, migration check (SQLite and Postgres), e2e pipeline, typecheck/build, Docker builds |
 
 ## Documentation
@@ -106,6 +110,7 @@ plus [docs/architecture.md](docs/architecture.md).
 | 7 | [MLOps](docs/phase-7-mlops.md) |
 | 8 | [Production: drift, metrics, security, CI/CD](docs/phase-8-production.md) |
 | 9 | [AI assistant](docs/phase-9-assistant.md) |
+| 10 | [Extended features: regression, LightGBM/PyTorch, LIME, model upload, accounts, tests, DVC, Kubernetes](docs/phase-10-extended-features.md) |
 
 ## How it differs from AutoML, MLflow and dashboards
 

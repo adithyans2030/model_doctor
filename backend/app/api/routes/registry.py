@@ -9,6 +9,7 @@ from app.api.deps import DbDep
 from app.api.routes.models import model_summary
 from app.db.models import MLModel
 from app.schemas import ModelSummary, Stage
+from app.core.errors import ForbiddenError
 from app.services import registry as svc
 from app.services.datasets import get_project
 from app.services.training import get_model
@@ -51,6 +52,9 @@ def _actor(request: Request, body_actor: str | None) -> str:
 def change_stage(model_id: str, body: StageRequest, request: Request, db: DbDep):
     """Move a model through the registry. Production requires prior human approval."""
     model = get_model(db, model_id)
+    role = getattr(request.state, "role", None)
+    if role is not None and role != "admin" and body.stage in {"approved", "production"}:
+        raise ForbiddenError("Only admins can approve or promote models.")
     svc.change_stage(db, model, body.stage, actor=_actor(request, body.actor), note=body.note,
                      acknowledge_risks=body.acknowledge_risks)
     return model_summary(model)

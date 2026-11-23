@@ -142,3 +142,48 @@ def quick_scores(y: np.ndarray, pred: np.ndarray, k: int) -> dict:
         "balanced_accuracy": _r(balanced_accuracy_score(y, pred)),
         "f1_macro": _r(f1_score(y, pred, average="macro", labels=labels, zero_division=0)),
     }
+
+
+# ----------------------------------------------------------------------------- regression
+def regression_quick(y: np.ndarray, pred: np.ndarray) -> dict:
+    from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+
+    return {
+        "r2": _r(r2_score(y, pred)) if len(y) > 1 else None,
+        "rmse": _r(float(np.sqrt(mean_squared_error(y, pred)))),
+        "mae": _r(mean_absolute_error(y, pred)),
+    }
+
+
+def regression_metrics(y: np.ndarray, pred: np.ndarray, *, sample_points: int = 300) -> dict:
+    """Held-out regression metrics plus what the dashboard needs to plot residuals."""
+    from sklearn.metrics import explained_variance_score, median_absolute_error
+
+    y = np.asarray(y, dtype=float)
+    pred = np.asarray(pred, dtype=float)
+    resid = y - pred
+    base = regression_quick(y, pred)
+    nonzero = np.abs(y) > 1e-9
+    mape = float(np.mean(np.abs(resid[nonzero] / y[nonzero]))) if nonzero.mean() > 0.9 else None
+    abs_err = np.abs(resid)
+    # Heteroscedasticity: do errors grow with the predicted value?
+    hetero = None
+    if len(y) > 10 and np.std(pred) > 0 and np.std(abs_err) > 0:
+        hetero = float(np.corrcoef(pred, abs_err)[0, 1])
+    top = np.sort(abs_err)[::-1]
+    k = max(1, len(top) // 20)
+    idx = np.random.default_rng(0).choice(len(y), size=min(sample_points, len(y)), replace=False)
+    counts, edges = np.histogram(resid, bins=20)
+    return {
+        "n": int(len(y)),
+        **base,
+        "median_ae": _r(median_absolute_error(y, pred)),
+        "mape": _r(mape) if mape is not None else None,
+        "explained_variance": _r(explained_variance_score(y, pred)),
+        "target_mean": _r(float(y.mean())), "target_std": _r(float(y.std())),
+        "residual_mean": _r(float(resid.mean())), "residual_std": _r(float(resid.std())),
+        "error_vs_prediction_corr": _r(hetero),
+        "top5pct_error_share": _r(float(top[:k].sum() / max(abs_err.sum(), 1e-12))),
+        "residual_histogram": {"edges": [float(e) for e in edges], "counts": [int(c) for c in counts]},
+        "points": [{"actual": float(y[i]), "predicted": float(pred[i])} for i in idx],
+    }
