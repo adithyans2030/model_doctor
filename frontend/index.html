@@ -5,6 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="Intelligent ML diagnostics & optimisation" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <meta name="theme-color" content="#0b0c0e" />
+    <script>
+      /* Apply the saved theme before first paint (dark is the default). */
+      try { if (localStorage.getItem("md_theme") === "light") document.documentElement.dataset.theme = "light"; } catch (e) {}
+    </script>
     <title>ModelDoctor</title>
   </head>
   <body>

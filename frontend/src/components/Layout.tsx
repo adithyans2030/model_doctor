@@ -3,7 +3,7 @@ import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { API_URL, getApiKey, setApiKey } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { cx } from "./ui";
+import { cx } from "./legacy-ui";
 
 type Theme = "system" | "light" | "dark";
 

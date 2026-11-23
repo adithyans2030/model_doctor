@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Navigate } from "react-router-dom";
-import { ErrorBox, Loading, Section } from "@/components/ui";
+import { ErrorBox, Loading, Section } from "@/components/legacy-ui";
 import { api, fmt } from "@/lib/api";
 import { isAdmin, useAuth } from "@/lib/auth";
 import { useResource } from "@/lib/hooks";

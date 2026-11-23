@@ -18,6 +18,8 @@ export default tseslint.config(
       "@typescript-eslint/no-unused-vars": ["error", { argsIgnorePattern: "^_", varsIgnorePattern: "^_" }],
       // Primitives forward autoFocus deliberately (dialogs focus their first control).
       "jsx-a11y/no-autofocus": "off",
+      // Scrollable regions (wide tables, code) must be focusable so keyboard users can scroll them.
+      "jsx-a11y/no-noninteractive-tabindex": ["error", { roles: ["tabpanel", "region"], tags: ["pre"] }],
     },
   },
 );

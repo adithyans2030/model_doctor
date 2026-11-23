@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
 import { Navigate, useLocation } from "react-router-dom";
-import { Loading } from "@/components/ui";
+import { Loading } from "@/components/legacy-ui";
 import { api, getToken, setToken } from "./api";
 import type { User } from "./types";
 

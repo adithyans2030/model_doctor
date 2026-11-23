@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api, streamNdjson } from "@/lib/api";
 import { Markdown } from "./Markdown";
-import { cx, Spinner } from "./ui";
+import { cx, Spinner } from "./legacy-ui";
 
 type Msg = { role: "user" | "assistant"; content: string; meta?: string; pending?: boolean };
 type Providers = {

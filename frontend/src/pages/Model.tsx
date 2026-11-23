@@ -5,7 +5,7 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { Bars, ConfusionMatrix, DivergingBars, Histogram, ScatterChart, ThresholdChart } from "@/components/charts";
 import {
   Crumbs, Empty, ErrorBox, FindingsList, Loading, Section, SeverityBadge, Spinner, StageBadge, Stat, Tabs, cx,
-} from "@/components/ui";
+} from "@/components/legacy-ui";
 import { api, fmt } from "@/lib/api";
 import { isAdmin, useAuth } from "@/lib/auth";
 import { useJob, useResource } from "@/lib/hooks";

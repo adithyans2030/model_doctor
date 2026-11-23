@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { Navigate, useLocation, useNavigate } from "react-router-dom";
-import { ErrorBox, cx } from "@/components/ui";
+import { ErrorBox, cx } from "@/components/legacy-ui";
 import { useAuth } from "@/lib/auth";
 
 export default function Login() {

@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { Crumbs, Empty, ErrorBox, Loading, Section, StageBadge } from "@/components/ui";
+import { Crumbs, Empty, ErrorBox, Loading, Section, StageBadge } from "@/components/legacy-ui";
 import { api, fmt } from "@/lib/api";
 import { useResource } from "@/lib/hooks";
 import type { Dataset, ModelSummary, Project } from "@/lib/types";

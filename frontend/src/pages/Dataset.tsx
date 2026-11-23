@@ -5,7 +5,7 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { Bars, Histogram } from "@/components/charts";
 import {
   Crumbs, Empty, ErrorBox, FindingsList, HealthPanel, Loading, Section, SeverityBadge, Spinner, StageBadge, Stat, Tabs, cx,
-} from "@/components/ui";
+} from "@/components/legacy-ui";
 import { api, fmt } from "@/lib/api";
 import { useJob, useResource } from "@/lib/hooks";
 import type { DataReport, Dataset, Diagnosis, Job, ModelSummary } from "@/lib/types";
