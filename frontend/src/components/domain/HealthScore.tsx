@@ -38,8 +38,9 @@ export function ComponentBar({ name, value, explanation }: { name: string; value
         <span className="capitalize text-fg">{name}</span>
         <span className={cx("font-mono tabular-nums", value == null ? "text-fg-3" : "text-fg")}>{value ?? "not measured"}</span>
       </div>
-      <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-surface-3" role="meter" aria-label={`${name} score`}
-        aria-valuenow={value ?? undefined} aria-valuemin={0} aria-valuemax={100} aria-valuetext={value == null ? "not measured" : `${value} of 100`}>
+      {/* Only a measured value is a meter; "not measured" is already in the text above. */}
+      <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-surface-3"
+        {...(value != null ? { role: "meter", "aria-label": `${name} score`, "aria-valuenow": value, "aria-valuemin": 0, "aria-valuemax": 100 } : { "aria-hidden": true })}>
         {value != null && <div className={cx("h-full rounded-full", value >= 80 ? "bg-success" : value >= 60 ? "bg-warning" : "bg-danger")} style={{ width: `${value}%` }} />}
       </div>
       <p className="mt-1 text-xs text-fg-3">{explanation}</p>

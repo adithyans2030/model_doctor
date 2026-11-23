@@ -69,7 +69,7 @@ function DiagnosisReport({ id, d }: { id: string; d: Diagnosis }) {
                         {r.because.map((b, j) => (
                           <span key={`${b.check}-${j}`}>
                             {j > 0 && "; "}
-                            <a href={`#${findingAnchor(b.check)}`} className={SEVERITY[r.severity].text}>{b.title}</a>
+                            <a href={`#${findingAnchor(b.check)}`} className={`underline decoration-current/40 underline-offset-2 ${SEVERITY[r.severity].text}`}>{b.title}</a>
                           </span>
                         ))}
                       </p>

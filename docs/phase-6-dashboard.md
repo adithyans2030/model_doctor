@@ -1,5 +1,8 @@
 # Phase 6: Dashboard (React + Vite + Tailwind CSS)
 
+> **Update:** the frontend has since been redesigned. The dashboard now lives at `/app`, with a landing page at `/`.
+> See [frontend.md](frontend.md) for the current routes, design tokens, components and tests. This page records the original build.
+
 **Goal:** a web UI covering the whole workflow (upload → diagnose → explain →
 optimise → approve → monitor → ask), built only on the public API.
 

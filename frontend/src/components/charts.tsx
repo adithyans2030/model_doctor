@@ -225,7 +225,8 @@ export function ConfusionMatrix({ labels, matrix }: { labels: string[]; matrix: 
                   const share = v / total;
                   return (
                     <td key={j} className="h-12 min-w-20 rounded-sm px-3 text-right font-mono tabular-nums"
-                      style={{ background: `color-mix(in oklab, var(--seq-1) ${Math.round(share * 85)}%, var(--seq-0))`, color: share > 0.5 ? "var(--surface-1)" : "var(--text-primary)" }}
+                      // Shading is capped at 45% so primary text stays above 4.5:1 on every cell, in both themes.
+                      style={{ background: `color-mix(in oklab, var(--seq-1) ${Math.round(share * 45)}%, var(--seq-0))`, color: "var(--text-primary)" }}
                       onMouseMove={(e) => show(e, <>actual <b>{labels[i]}</b> → predicted <b>{labels[j]}</b><br />{v} rows ({(share * 100).toFixed(1)}% of actual {labels[i]})</>)}>
                       {v}
                       <span className="sr-only"> rows, {(share * 100).toFixed(1)}% of actual {labels[i]}</span>

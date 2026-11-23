@@ -27,7 +27,7 @@ export function FindingCard({ finding: f, defaultOpen, anchor }: { finding: Find
   return (
     <article
       id={anchor ? findingAnchor(f.check) : undefined}
-      className={cx("relative scroll-mt-24 overflow-hidden rounded-lg border border-line bg-surface", f.resolved && "opacity-70")}
+      className="relative scroll-mt-24 overflow-hidden rounded-lg border border-line bg-surface"
     >
       <span aria-hidden className={cx("absolute inset-y-0 left-0 w-[3px]", SEVERITY[f.severity].rail)} />
       <h3 className="m-0">
@@ -40,7 +40,7 @@ export function FindingCard({ finding: f, defaultOpen, anchor }: { finding: Find
         >
           <ChevronRight size={16} aria-hidden className={cx("mt-0.5 shrink-0 text-fg-3 transition-transform", open && "rotate-90")} />
           <span className="min-w-0 flex-1">
-            <span className="block text-sm font-medium leading-5 text-fg">{f.title}</span>
+            <span className={cx("block text-sm font-medium leading-5", f.resolved ? "text-fg-2" : "text-fg")}>{f.title}</span>
             <span className="mt-1.5 flex flex-wrap items-center gap-1.5">
               <SeverityBadge severity={f.severity} />
               <Badge mono>{f.check}</Badge>

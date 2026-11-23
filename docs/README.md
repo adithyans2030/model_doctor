@@ -5,6 +5,7 @@ Read in order; each phase builds on the previous ones.
 | Phase | Document | In one line |
 |---|---|---|
 | — | [architecture.md](architecture.md) | How the pieces fit, the data flow, and the key design decisions |
+| — | [frontend.md](frontend.md) | Landing page and dashboard: routes, design tokens, components, accessibility, tests |
 | 1 | [phase-1-foundation.md](phase-1-foundation.md) | Safe CSV ingestion, schema profiling, target validation |
 | 2 | [phase-2-data-doctor.md](phase-2-data-doctor.md) | Data and feature health checks, the finding format, the data-quality score |
 | 3 | [phase-3-model-doctor.md](phase-3-model-doctor.md) | Reproducible baselines, imbalance-aware metrics, model diagnosis, health score, background jobs |

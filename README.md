@@ -48,7 +48,7 @@ pytest                                                # 128 tests
 # Dashboard (second terminal)
 cd frontend
 npm install
-npm run dev                                           # http://localhost:3000
+npm run dev                                           # http://localhost:3000 (landing) · /app (dashboard)
 ```
 
 Run the whole pipeline headlessly and write JSON reports:
@@ -67,7 +67,7 @@ docker compose up --build
 
 | Service | URL |
 |---|---|
-| Dashboard | http://localhost:3000 |
+| Landing page / dashboard | http://localhost:3000 / http://localhost:3000/app |
 | API + OpenAPI docs | http://localhost:8000/docs |
 | MLflow | http://localhost:5000 |
 | Prometheus | http://localhost:9090 |
@@ -90,7 +90,7 @@ it uses rule-based answers built from the same results. A Claude API key is opti
 | Tasks | Binary / multiclass classification **and regression** (R², RMSE, residual analysis, log-target fix) |
 | Models | Logistic/Ridge, Random Forest, XGBoost, LightGBM, SVM, PyTorch MLP (optional), plus **your own models** (safe skops upload) |
 | Accounts | Sign-in with Argon2 + JWT, viewer / member / admin roles |
-| Frontend | React 19, Vite 8, Tailwind CSS 4, React Router 7, TypeScript, hand-built SVG charts; Vitest + Playwright tests |
+| Frontend | React 19, Vite 8, Tailwind CSS 4, React Router 7, TanStack Query, TypeScript; design-token system, hand-built SVG charts + Recharts; Vitest, Playwright + axe tests ([docs/frontend.md](docs/frontend.md)) |
 | Deploy | Docker Compose, Kubernetes manifests (Kustomize), images published to GHCR on release |
 | CI | GitHub Actions: pytest, migration check (SQLite and Postgres), e2e pipeline, typecheck/build, Docker builds |
 

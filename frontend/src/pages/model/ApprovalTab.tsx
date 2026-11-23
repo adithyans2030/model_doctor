@@ -1,7 +1,7 @@
 import { CheckCircle2, CircleX, GitCompareArrows, History, Minus, Plus, ShieldAlert, TriangleAlert } from "lucide-react";
 import { useState } from "react";
 import { QueryView } from "@/components/domain/QueryView";
-import { SeverityBadge, StageBadge } from "@/components/domain/severity";
+import { StageBadge } from "@/components/domain/severity";
 import {
   Badge, Button, Card, CardSkeleton, ConfirmDialog, DeltaBadge, EmptyState, InlineError, TBody, TD, TH, THead, TR, Table,
   TableSkeleton, Tooltip, useToast,
@@ -195,7 +195,7 @@ function DecisionCard({ m }: { m: ModelDetail }) {
         {critical.length > 0 && (
           <div className="rounded-md border border-danger/40 bg-danger-subtle px-3 py-2.5">
             <p className="flex items-center gap-2 text-sm font-medium"><ShieldAlert size={15} aria-hidden className="text-danger" />{critical.length} unresolved critical finding{critical.length > 1 ? "s" : ""}</p>
-            <ul className="mt-1.5 space-y-1 text-sm text-fg-2">{critical.map((f, i) => <li key={i} className="flex items-start gap-2"><SeverityBadge severity="critical" /> <span className="min-w-0">{f.title}</span></li>)}</ul>
+            <ul className="mt-1.5 list-disc space-y-1 pl-6 text-sm text-fg">{critical.map((f, i) => <li key={i}>{f.title}</li>)}</ul>
             <label className="mt-2.5 flex items-center gap-2 text-sm">
               <input type="checkbox" className="size-4 accent-[var(--accent)]" checked={ack} onChange={(e) => setAck(e.target.checked)} />
               I acknowledge these risks
