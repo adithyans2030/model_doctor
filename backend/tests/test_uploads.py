@@ -3,6 +3,7 @@
 import pickle
 
 import numpy as np
+import pandas as pd
 import pytest
 from sklearn.compose import ColumnTransformer
 from sklearn.impute import SimpleImputer
@@ -38,7 +39,8 @@ def _fit_user_model(dataset, df, settings, estimator, *, drop=()):
     frame, y = labelled_rows(df, dataset["target_column"], profile, settings)
     spec = build_feature_spec(dataset["columns"], dataset["target_column"], drop)
     X = prepare_frame(frame, spec)
-    y = y.astype(int) if not np.issubdtype(y.dtype, np.floating) else y
+    # pandas' own check: np.issubdtype can't read pandas 3's default string dtype.
+    y = y.astype(int) if not pd.api.types.is_float_dtype(y.dtype) else y
     return _user_pipeline(estimator, spec).fit(X, y)
 
 
