@@ -15,7 +15,7 @@ export function Hero() {
         <div className="grid grid-cols-12 gap-6">
           <div className="col-span-12 lg:col-span-9">
             <p className="mb-5 inline-flex items-center gap-2 rounded-full border border-line bg-surface px-3 py-1 text-xs text-fg-2">
-              <span className="size-1.5 rounded-full bg-success" aria-hidden /> Open source · MIT · runs on your machine
+               Open source · MIT · runs on your machine
             </p>
             <h1 id="hero-title" className="text-3xl font-semibold leading-[1.08] tracking-[-0.03em] text-balance sm:text-4xl lg:text-5xl">
               Find out why your model underperforms. Then prove the fix.
