@@ -1,13 +1,19 @@
 # 🩺 ModelDoctor
 
-**An intelligent system for diagnosing, explaining and optimising machine-learning models.**
+**Diagnoses why ML models underperform, tests targeted fixes with cross-validation, and puts a
+human approval gate before production. Deterministic analysis; the AI only explains.**
 
-ModelDoctor examines a dataset and the models trained on it, works out *why* a model
-underperforms, explains the root causes, recommends fixes, **runs the experiments to
-check which fix actually works**, and hands the winner to a human for approval.
+ModelDoctor is an open-source tool that finds out *why* a machine-learning model underperforms
+and proves which fix works. It runs statistical checks on a dataset and its trained models to
+detect problems such as target leakage, class imbalance, missing values, overfitting and drift.
+Each problem comes with evidence and a recommended fix. It then tests those fixes one at a
+time, keeping only the ones that improve the cross-validated score, and sends the best model to
+a person for approval before production. An AI assistant (local Ollama by default) explains the
+results but never makes the diagnosis itself. On a synthetic churn dataset with 9 planted
+problems, it found all 9 and raised churn recall from 5% to 49%.
 
-> Diagnoses come from deterministic ML and statistical analysis. The AI assistant (your local
-> Ollama models by default) only explains those structured results; it never invents a diagnosis.
+*Built with FastAPI, scikit-learn, XGBoost, LightGBM, SHAP, MLflow, React, TypeScript and
+Tailwind CSS; 128 backend tests and Playwright end-to-end tests with accessibility checks.*
 
 ## What it finds (demo dataset)
 
